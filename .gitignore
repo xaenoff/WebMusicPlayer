@@ -1,0 +1,21 @@
+# Файлы сборки и временные папки
+bin/
+obj/
+*.userprefs
+*.user
+.vs/
+
+# Конфиги с секретами (ЛОКАЛЬНЫЕ НАСТРОЙКИ)
+appsettings.Development.json
+appsettings.Production.json
+wwwroot/covers/
+wwwroot/music/
+
+# Системные файлы
+.DS_Store
+Thumbs.db
+
+# База данных
+*.bak
+*.mdf
+*.ldf

@@ -1,0 +1,112 @@
+﻿@using WebMusicPlayer.Components.Shared
+@page "/"
+@using Microsoft.AspNetCore.Authorization
+@using WebMusicPlayer.Data.Models
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject IMusicService MusicService
+@inject PlayerService PlayerService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+
+<div class="section">
+    <h3 class="section-title">// TRACKS</h3>
+    @if (tracks != null && tracks.Any())
+    {
+       <div class="track-list">
+        @foreach (var track in tracks.Take(8))
+        {
+            <div class="track-item @(PlayerService.CurrentTrack?.Id == track.Id ? "playing" : "")" 
+                 @onclick="() => PlayTrack(track)">
+                
+                <img src="@(track.CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+                
+                <div style="flex: 1; min-width: 0;">
+                    <div class="track-name">@track.Title</div>
+                    <div class="artist-name">@track.Artist</div>
+                </div>
+
+                    <FavoriteButton TrackId="track.Id"
+                                    IsFavorite="@_favoriteIds.Contains(track.Id)"
+                                    OnChanged="@(isFav => OnFavoriteChanged(track.Id, isFav))" />
+            </div>
+        }
+    </div>
+    }
+</div>
+
+<div class="section">
+    <h3 class="section-title">// GENRES</h3>
+    <div class="grid">
+        @for (int i = 0; i < 4; i++)
+        {
+            <div class="card">
+                <img src="https://picsum.photos/300/300?random=@i&grayscale" alt="Genre" />
+                <div class="card-title">GENRE @(i + 1)</div>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="section">
+    <h3 class="section-title">// USER MIXES</h3>
+    <div class="grid">
+        @for (int i = 0; i < 4; i++)
+        {
+            <div class="card">
+                <img src="https://picsum.photos/300/300?random=@(i+10)&grayscale" alt="User Playlist" />
+                <div class="card-title">MIX @(i + 1)</div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<Track> tracks = new();
+    private HashSet<int> _favoriteIds = new();
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            tracks = await MusicService.GetAllTracksAsync();
+
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            if (auth.User.Identity?.IsAuthenticated == true)
+            {
+                var userIdClaim = auth.User.FindFirst("UserId");
+                if (userIdClaim != null && int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    var favs = await MusicService.GetFavoriteTracksAsync(userId);
+                    _favoriteIds = new HashSet<int>(favs.Select(t => t.Id));
+                }
+            }
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task PlayTrack(Track track)
+    {
+        PlayerService.SetQueue(tracks, track);
+        await JS.InvokeVoidAsync("audioManager.loadAndPlay", track.FilePath);
+    }
+    private void OnFavoriteChanged(int trackId, bool isFavorite)
+    {
+        if (isFavorite)
+        {
+            _favoriteIds.Add(trackId);
+        }
+        else
+        {
+            _favoriteIds.Remove(trackId);
+        }
+
+        // Мгновенно обновляем разметку страницы
+        StateHasChanged();
+    }
+}

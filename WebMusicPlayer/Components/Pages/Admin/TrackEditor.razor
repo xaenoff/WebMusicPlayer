@@ -1,0 +1,442 @@
+﻿@page "/admin/tracks/edit/{trackId:int}"
+@attribute [Authorize(Roles = "Admin")]
+@layout AdminLayout
+@rendermode InteractiveServer
+
+@using Microsoft.AspNetCore.Components.Forms
+@using WebMusicPlayer.Data.Models
+
+@inject IMusicService MusicService
+@inject IWebHostEnvironment Environment
+@inject NavigationManager Navigation
+
+@if (isLoading)
+{
+    <div style="color: #888; padding: 40px; text-align: center;">Загрузка...</div>
+}
+else if (track == null)
+{
+    <div style="color: #f44336; padding: 40px; text-align: center;">
+        ❌ Трек не найден (ID: @trackId)<br />
+        <a href="/admin/tracks" style="color: white; text-decoration: underline;">← Вернуться к списку</a>
+    </div>
+}
+else
+{
+    <h3 style="color: white; margin-bottom: 30px;">✏️ Редактирование трека</h3>
+
+    <div class="edit-form">
+        <div class="form-group">
+            <label>ID трека</label>
+            <input type="text" class="form-control" value="@track.Id" disabled />
+        </div>
+
+        <div class="form-group">
+            <label>Название трека *</label>
+            <input @bind="editModel.Title" class="form-control" placeholder="Введите название" />
+        </div>
+
+        <div class="form-group">
+            <label>Исполнитель *</label>
+            <input @bind="editModel.Artist" class="form-control" placeholder="Введите исполнителя" />
+        </div>
+
+        <div class="form-group">
+            <label>Жанр</label>
+            <select @bind="editModel.GenreId" class="form-control">
+                <option value="0">— Без жанра —</option>
+                @foreach (var genre in genres)
+                {
+                    <option value="@genre.Id">@genre.Name</option>
+                }
+            </select>
+        </div>
+
+        <div class="form-group">
+            <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                <input type="checkbox" @bind="editModel.IsAvailable" style="width: auto;" />
+                <span>Трек доступен для просмотра</span>
+            </label>
+        </div>
+
+        @if (!string.IsNullOrEmpty(track.CoverPath))
+        {
+            <div class="form-group">
+                <label>Текущая обложка</label>
+                <div style="display: flex; align-items: center; gap: 16px;">
+                    <img src="@track.CoverPath" alt="Cover" style="width: 60px; height: 60px; object-fit: cover; border-radius: 4px;" />
+                    <span style="color: #888; font-size: 12px;">@track.CoverPath</span>
+                </div>
+            </div>
+        }
+
+        <div class="form-group">
+            <label>Заменить обложку (необязательно)</label>
+            <InputFile OnChange="OnCoverSelected" accept="image/*" class="form-control" />
+            @if (newCoverFile != null)
+            {
+                <div class="file-info">✅ Выбрано: @newCoverFile.Name</div>
+            }
+        </div>
+
+        <div class="form-group">
+            <label>Аудиофайл</label>
+            <input type="text" class="form-control" value="@track.FilePath" disabled />
+            <small style="color: #666;">⚠️ Замена аудиофайла не поддерживается.</small>
+        </div>
+
+        <div class="form-actions">
+            <button @onclick="SaveChanges" class="btn btn-primary" disabled="@isSaving">
+                @(isSaving ? " Сохранение..." : "Сохранить изменения")
+            </button>
+            <a href="/admin/tracks" class="btn btn-secondary">Отмена</a>
+            <button @onclick="ConfirmHardDelete" class="btn btn-danger" disabled="@isSaving">
+                🗑Удалить навсегда
+            </button>
+        </div>
+
+        @if (!string.IsNullOrEmpty(message))
+        {
+            <div class="alert @(isError ? "alert-error" : "alert-success")">@message</div>
+        }
+    </div>
+}
+
+@if (showHardDeleteConfirm)
+{
+    <div class="modal-overlay" @onclick="CancelHardDelete">
+        <div class="modal-content" @onclick:stopPropagation>
+            <h4 style="color: #f44336; margin-bottom: 20px;">⚠️ Полное удаление</h4>
+            <p style="color: #ccc; margin-bottom: 20px;">
+                Вы действительно хотите <strong>полностью удалить</strong> трек "@track?.Title"?<br />
+                <small style="color: #f44336;">Это действие нельзя отменить.</small>
+            </p>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button @onclick="CancelHardDelete" class="btn btn-secondary">Отмена</button>
+                <button @onclick="ExecuteHardDelete" class="btn btn-danger">Да, удалить навсегда</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int trackId { get; set; }
+
+    private Track? track;
+    private TrackEditModel editModel = new();
+    private List<Genre> genres = new();
+    private IBrowserFile? newCoverFile;
+
+    private bool isLoading = true;
+    private bool isSaving = false;
+    private string? message;
+    private bool isError = false;
+    private bool showHardDeleteConfirm = false;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        Console.WriteLine($"[TrackEdit] 🔍 Загрузка трека с ID: {trackId}");
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        try
+        {
+            // Сначала загружаем трек
+            track = await MusicService.GetTrackByIdAsync(trackId);
+            Console.WriteLine($"[TrackEdit] Трек загружен: {track?.Title}");
+
+            // Потом загружаем жанры
+            genres = await MusicService.GetAllGenresAsync();
+            Console.WriteLine($"[TrackEdit] Жанры загружены: {genres.Count} шт.");
+
+            if (track == null)
+            {
+                Console.WriteLine($"[TrackEdit] Трек с ID {trackId} не найден в БД!");
+                return;
+            }
+
+            // Заполняем модель для редактирования
+            editModel = new TrackEditModel
+                {
+                    Id = track.Id,
+                    Title = track.Title,
+                    Artist = track.Artist,
+                    GenreId = track.GenreId ?? 0,
+                    IsAvailable = track.IsAvailable
+                };
+        }
+        catch (Exception ex)
+        {
+            message = $"Ошибка загрузки: {ex.Message}";
+            isError = true;
+            Console.WriteLine($"[TrackEdit] Load error: {ex}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task OnCoverSelected(InputFileChangeEventArgs e)
+    {
+        newCoverFile = e.File;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task SaveChanges()
+    {
+        if (string.IsNullOrWhiteSpace(editModel.Title) || string.IsNullOrWhiteSpace(editModel.Artist))
+        {
+            message = "Название и исполнитель обязательны";
+            isError = true;
+            StateHasChanged();
+            return;
+        }
+
+        isSaving = true;
+        message = null;
+        StateHasChanged();
+
+        try
+        {
+            if (newCoverFile != null)
+            {
+                var coverFolder = Path.Combine(Environment.WebRootPath, "covers");
+                if (!Directory.Exists(coverFolder)) Directory.CreateDirectory(coverFolder);
+
+                var coverFileName = $"{Guid.NewGuid()}{Path.GetExtension(newCoverFile.Name)}";
+                var coverPath = Path.Combine(coverFolder, coverFileName);
+
+                using (var stream = new FileStream(coverPath, FileMode.Create))
+                    await newCoverFile.OpenReadStream().CopyToAsync(stream);
+
+                editModel.CoverPath = $"/covers/{coverFileName}";
+
+                if (!string.IsNullOrEmpty(track?.CoverPath) && File.Exists(Path.Combine(Environment.WebRootPath, track.CoverPath.TrimStart('/'))))
+                    try { File.Delete(Path.Combine(Environment.WebRootPath, track.CoverPath.TrimStart('/'))); } catch { }
+            }
+
+            var updatedTrack = new Track
+                {
+                    Id = track!.Id,
+                    Title = editModel.Title.Trim(),
+                    Artist = editModel.Artist.Trim(),
+                    GenreId = editModel.GenreId > 0 ? editModel.GenreId : null,
+                    CoverPath = editModel.CoverPath ?? track.CoverPath,
+                    FilePath = track.FilePath,
+                    DurationSeconds = track.DurationSeconds,
+                    IsAvailable = editModel.IsAvailable,
+                    Lyrics = track.Lyrics
+                };
+
+            var success = await MusicService.UpdateTrackAsync(updatedTrack);
+
+            if (success)
+            {
+                message = "Изменения сохранены!";
+                isError = false;
+                newCoverFile = null;
+                track = updatedTrack;
+            }
+            else
+            {
+                message = "Не удалось сохранить изменения";
+                isError = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            message = $"Ошибка: {ex.Message}";
+            isError = true;
+            Console.WriteLine($"[TrackEdit] Save error: {ex}");
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ConfirmHardDelete()
+    {
+        showHardDeleteConfirm = true;
+        StateHasChanged();
+    }
+
+    private void CancelHardDelete()
+    {
+        showHardDeleteConfirm = false;
+        StateHasChanged();
+    }
+
+    private async Task ExecuteHardDelete()
+    {
+        try
+        {
+            await MusicService.HardDeleteTrackAsync(trackId);
+            Navigation.NavigateTo("/admin/tracks");
+        }
+        catch (Exception ex)
+        {
+            message = $"Ошибка удаления: {ex.Message}";
+            isError = true;
+        }
+        StateHasChanged();
+    }
+
+    public class TrackEditModel
+    {
+        public int Id { get; set; }
+        public string Title { get; set; } = "";
+        public string Artist { get; set; } = "";
+        public int GenreId { get; set; } = 0;
+        public string? CoverPath { get; set; }
+        public bool IsAvailable { get; set; } = true;
+    }
+}
+
+<style>
+    .edit-form {
+        max-width: 600px;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #888;
+            font-size: 14px;
+        }
+
+    .form-control {
+        width: 100%;
+        padding: 10px;
+        background: #111;
+        border: 1px solid #333;
+        color: white;
+        border-radius: 6px;
+        font-size: 14px;
+        box-sizing: border-box;
+    }
+
+        .form-control:focus {
+            border-color: #555;
+            outline: none;
+        }
+
+        .form-control:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+    .file-info {
+        margin-top: 5px;
+        font-size: 12px;
+        color: #4CAF50;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 30px;
+        flex-wrap: wrap;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+    }
+
+    .btn-primary {
+        background: white;
+        color: black;
+        font-weight: bold;
+    }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #ddd;
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+    .btn-secondary {
+        background: #333;
+        color: white;
+    }
+
+        .btn-secondary:hover {
+            background: #444;
+        }
+
+    .btn-danger {
+        background: #f44336;
+        color: white;
+    }
+
+        .btn-danger:hover:not(:disabled) {
+            background: #d32f2f;
+        }
+
+        .btn-danger:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+    .alert {
+        margin-top: 20px;
+        padding: 12px;
+        border-radius: 6px;
+        font-size: 14px;
+    }
+
+    .alert-success {
+        background: rgba(76, 175, 80, 0.1);
+        border: 1px solid #4CAF50;
+        color: #4CAF50;
+    }
+
+    .alert-error {
+        background: rgba(244, 67, 54, 0.1);
+        border: 1px solid #f44336;
+        color: #f44336;
+    }
+
+    .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0,0,0,0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+    }
+
+    .modal-content {
+        background: #111;
+        border: 1px solid #333;
+        border-radius: 8px;
+        padding: 24px;
+        min-width: 320px;
+        max-width: 90%;
+    }
+</style>

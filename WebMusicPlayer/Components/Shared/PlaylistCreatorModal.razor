@@ -1,0 +1,291 @@
+﻿@namespace WebMusicPlayer.Components.Shared
+
+@inject IMusicService MusicService
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Components.Forms
+@inject IWebHostEnvironment Environment
+
+@if (Visible)
+{
+    <div class="modal-overlay" @onclick="CloseModal">
+        <div class="modal-content" @onclick:stopPropagation>
+            <div class="modal-header">
+                <h3>Создание нового плейлиста</h3>
+                <button @onclick="CloseModal" class="modal-close">✕</button>
+            </div>
+
+            <div class="modal-body">
+                <!-- Поле названия -->
+                <div class="form-group">
+                    <label>Название плейлиста</label>
+                    <input type="text"
+                           @bind="playlistName"
+                           placeholder="Введите название..."
+                           class="form-control"
+                           autofocus />
+                </div>
+
+                <!-- Загрузка обложки плейлиста (опционально) -->
+                <div class="form-group">
+                    <label>Обложка плейлиста (необязательно)</label>
+                    <InputFile OnChange="OnCoverSelected" accept="image/*" class="form-control" />
+                    @if (selectedCoverFile != null)
+                    {
+                        <div class="file-info" style="margin-top: 5px; font-size: 12px; color: #4CAF50;">
+                            ✅ Выбрано: @selectedCoverFile.Name
+                        </div>
+                    }
+                </div>
+
+                <!-- Переключатель видимости -->
+                <div class="form-group" style="margin-top: 16px;">
+                    <label class="public-toggle">
+                        <input type="checkbox" @bind="isPublic" class="toggle-checkbox" />
+                        <span class="toggle-label">Сделать плейлист публичным</span>
+                    </label>
+                </div>
+          
+
+                <div class="form-group">
+                    <label>Поиск треков</label>
+                    <input type="text"
+                           @oninput="OnSearchInput"
+                           placeholder="Поиск по названию или исполнителю..."
+                           class="form-control"
+                           value="@searchQuery" />
+                </div>
+
+                <div class="form-group">
+                    <label>Жанр</label>
+                    <select @onchange="OnGenreChanged" class="form-control">
+                        <option value="">Все жанры</option>
+                        @foreach (var genre in availableGenres)
+                        {
+                            <option value="@genre">@genre</option>
+                        }
+                    </select>
+                </div>
+
+                <!-- Список треков для выбора -->
+                <div class="track-selection">
+                    <label style="display: block; margin-bottom: 8px; color: var(--text-dim); font-size: 12px;">
+                        Выбрано треков: <strong style="color: var(--text-main);">@selectedTrackIds.Count</strong> из @filteredTracks.Count
+                    </label>
+
+                    @if (filteredTracks.Any())
+                    {
+                        <div class="track-list-modal">
+                            @foreach (var track in filteredTracks)
+                            {
+                                <div class="track-item-modal @(selectedTrackIds.Contains(track.Id) ? "selected" : "")"
+                                     @onclick="() => ToggleTrackSelection(track.Id)">
+                                    <img src="@(track.CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+                                    <div class="track-info">
+                                        <div class="track-name">@track.Title</div>
+                                        <div class="artist-name">@track.Artist</div>
+                                        @if (track.Genre != null)
+                                        {
+                                            <div class="genre-tag" style="font-size: 9px; color: var(--text-dim); margin-top: 2px;">
+                                                @track.Genre.Name
+                                            </div>
+                                        }
+                                    </div>
+                                    <div class="track-checkbox-modal">
+                                        @(selectedTrackIds.Contains(track.Id) ? "✓" : "")
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="no-tracks-found" style="padding: 20px; text-align: center; color: var(--text-dim);">
+                            Треки не найдены
+                        </div>
+                    }
+                </div>
+
+                <!-- Сообщения об успехе/ошибке -->
+                @if (!string.IsNullOrEmpty(message))
+                {
+                    <div class="alert @(message.Contains("Ошибка") ? "alert-error" : "alert-success")" style="margin-top: 16px;">
+                        @message
+                    </div>
+                }
+            </div>
+
+            <div class="modal-footer">
+                <button @onclick="CloseModal" class="btn btn-secondary">Отмена</button>
+                <button @onclick="CreatePlaylist"
+                        class="btn btn-outline"
+                        disabled="@(selectedTrackIds.Count == 0 || string.IsNullOrWhiteSpace(playlistName) || isCreating)">
+                    @(isCreating ? "⏳ Создание..." : "Создать плейлист")
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback OnPlaylistCreated { get; set; }
+
+    [Parameter, EditorRequired] public List<Track> SourceTracks { get; set; } = new();
+
+
+    private string playlistName = "";
+    private string message = "";
+    private bool isCreating = false;
+    private HashSet<int> selectedTrackIds = new();
+
+    private string searchQuery = "";
+    private bool isPublic = false;
+    private IBrowserFile? selectedCoverFile;
+    private string selectedGenreFilter = "";
+    private List<string> availableGenres = new();
+    private List<Track> filteredTracks = new();
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible)
+        {
+            await InitializeModalAsync();
+        }
+    }
+
+    private async Task InitializeModalAsync()
+    {
+        isPublic = false;
+        playlistName = "";
+        message = "";
+        selectedTrackIds.Clear();
+        searchQuery = "";
+        selectedGenreFilter = "";
+
+        availableGenres = SourceTracks
+            .Where(t => t.Genre != null && !string.IsNullOrEmpty(t.Genre.Name))
+            .Select(t => t.Genre!.Name)
+            .Distinct()
+            .OrderBy(g => g)
+            .ToList();
+
+        filteredTracks = new List<Track>(SourceTracks);
+
+        await Task.CompletedTask;
+    }
+
+    private void CloseModal()
+    {
+        OnClose.InvokeAsync();
+    }
+
+    private Task OnSearchInput(ChangeEventArgs e)
+    {
+        searchQuery = e.Value?.ToString() ?? "";
+        FilterTracks();
+        return Task.CompletedTask;
+    }
+
+    private Task OnGenreChanged(ChangeEventArgs e)
+    {
+        selectedGenreFilter = e.Value?.ToString() ?? "";
+        FilterTracks();
+        return Task.CompletedTask;
+    }
+
+
+    private void FilterTracks()
+    {
+        IEnumerable<Track> query = SourceTracks;
+
+        // Фильтр по поиску
+        if (!string.IsNullOrWhiteSpace(searchQuery))
+        {
+            var searchLower = searchQuery.ToLower();
+            query = query.Where(t =>
+                t.Title.ToLower().Contains(searchLower) ||
+                t.Artist.ToLower().Contains(searchLower));
+        }
+
+        // Фильтр по жанру
+        if (!string.IsNullOrWhiteSpace(selectedGenreFilter))
+        {
+            query = query.Where(t => t.Genre != null && t.Genre.Name == selectedGenreFilter);
+        }
+
+        filteredTracks = query.ToList();
+    }
+
+    private void ToggleTrackSelection(int trackId)
+    {
+        if (selectedTrackIds.Contains(trackId))
+            selectedTrackIds.Remove(trackId);
+        else
+            selectedTrackIds.Add(trackId);
+    }
+
+    private async Task CreatePlaylist()
+    {
+        if (selectedTrackIds.Count == 0 || string.IsNullOrWhiteSpace(playlistName))
+            return;
+
+        isCreating = true;
+        message = "";
+
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var userIdClaim = auth.User.FindFirst("UserId");
+
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            {
+                message = "Ошибка авторизации";
+                return;
+            }
+
+            string? coverPathDb = null;
+            if (selectedCoverFile != null)
+            {
+                var coverFolder = Path.Combine(Environment.WebRootPath, "covers");
+                if (!Directory.Exists(coverFolder)) Directory.CreateDirectory(coverFolder);
+
+                var coverFileName = $"{Guid.NewGuid()}{Path.GetExtension(selectedCoverFile.Name)}";
+                var coverPath = Path.Combine(coverFolder, coverFileName);
+
+                using (var stream = new FileStream(coverPath, FileMode.Create))
+                {
+                    await selectedCoverFile.OpenReadStream().CopyToAsync(stream);
+                }
+
+                coverPathDb = $"/covers/{coverFileName}";
+            }
+
+            var trackIds = selectedTrackIds.ToList();
+            await MusicService.CreatePlaylistAsync(userId, playlistName.Trim(), trackIds, coverPathDb, isPublic);
+
+            // Успех
+            message = " Плейлист создан!";
+
+            await OnPlaylistCreated.InvokeAsync();
+
+            await Task.Delay(800);
+            CloseModal();
+        }
+        catch (Exception ex)
+        {
+            message = $" Ошибка: {ex.Message}";
+            Console.WriteLine($"[PlaylistCreatorModal] Error: {ex}");
+        }
+        finally
+        {
+            isCreating = false;
+        }
+    }
+    private Task OnCoverSelected(InputFileChangeEventArgs e)
+    {
+        selectedCoverFile = e.File;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+}

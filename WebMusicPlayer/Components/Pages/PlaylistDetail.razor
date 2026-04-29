@@ -1,0 +1,128 @@
+﻿@page "/playlist/{PlaylistId:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject IMusicService MusicService
+@inject PlayerService PlayerService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+
+@if (isLoading)
+{
+    <div class="text-muted" style="padding: 40px; text-align: center;">Загрузка плейлиста...</div>
+}
+else if (playlist == null)
+{
+    <div class="text-muted" style="padding: 40px; text-align: center;">Плейлист не найден</div>
+}
+else
+{
+    <div class="playlist-header">
+        <div class="playlist-header-cover">
+            @if (tracks.Any())
+            {
+                <img src="@(tracks.First().CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+            }
+            else
+            {
+                <img src="/images/default-cover.png" alt="Cover" />
+            }
+        </div>
+        <div class="playlist-header-info">
+            <div class="playlist-type">Плейлист</div>
+            <h1 class="playlist-title">@playlist.Name</h1>
+            <div class="playlist-stats">
+                @if (playlist != null)
+                {
+                    <div style="margin-top: 16px;">
+                        <a href="/playlist/@PlaylistId/edit" class="btn btn-outline" style="font-size: 12px; padding: 6px 12px;">
+                            Редактировать плейлист
+                        </a>
+                    </div>
+                }
+                <span>@tracks.Count треков</span>
+
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        @if (tracks.Any())
+        {
+            <div class="track-list">
+                @for (int i = 0; i < tracks.Count; i++)
+                {
+                    var track = tracks[i];
+                    <div class="track-item @(PlayerService.CurrentTrack?.Id == track.Id ? "playing" : "")"
+                         @onclick="() => PlayTrack(track)">
+                        <div class="track-number">@(i + 1)</div>
+                        <img src="@(track.CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+                        <div style="flex: 1; min-width: 0;">
+                            <div class="track-name">@track.Title</div>
+                            <div class="artist-name">@track.Artist</div>
+                        </div>
+                        @if (track.Genre != null)
+                        {
+                            <div style="font-size: 10px; color: var(--text-dim);">
+                                @track.Genre.Name
+                            </div>
+                        }
+                        <div style="font-size: 10px; color: var(--text-dim);">
+                            @FormatTime(track.DurationSeconds)
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="text-muted" style="padding: 40px; text-align: center;">
+                В этом плейлисте пока нет треков
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int PlaylistId { get; set; }
+    private Playlist? playlist;
+    private List<Track> tracks = new();
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            playlist = await MusicService.GetPlaylistByIdAsync(PlaylistId);
+            if (playlist != null)
+            {
+                tracks = await MusicService.GetPlaylistTracksAsync(PlaylistId);
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading playlist: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task PlayTrack(Track track)
+    {
+        PlayerService.SetQueue(tracks, track);
+        await JS.InvokeVoidAsync("audioManager.loadAndPlay", track.FilePath);
+    }
+
+    private string FormatTime(double seconds)
+    {
+        if (double.IsNaN(seconds)) return "0:00";
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.Hours > 0
+            ? $"{ts.Hours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
+            : $"{ts.Minutes}:{ts.Seconds:D2}";
+    }
+}

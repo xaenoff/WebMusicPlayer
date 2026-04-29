@@ -1,0 +1,324 @@
+﻿@page "/playlist/{PlaylistId:int}/edit"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject IMusicService MusicService
+@inject IWebHostEnvironment Environment
+@inject NavigationManager Navigation
+@inject AuthenticationStateProvider AuthState
+
+@if (isLoading)
+{
+    <div class="text-muted" style="padding: 40px; text-align: center;">Загрузка...</div>
+}
+else if (playlist == null || !isOwner)
+{
+    <div class="text-muted" style="padding: 40px; text-align: center;">
+        Плейлист не найден или у вас нет прав на редактирование.<br />
+        <a href="/playlists" style="color: var(--text-main);">← Вернуться к плейлистам</a>
+    </div>
+}
+else
+{
+    <div class="section">
+        <h3 class="section-title">✏️ Редактирование плейлиста</h3>
+
+        <!-- ФОРМА РЕДАКТИРОВАНИЯ -->
+        <div class="form-group">
+            <label>Название плейлиста</label>
+            <input @bind="editName" class="form-control" placeholder="Введите название..." />
+        </div>
+
+        <div class="form-group">
+            <label class="public-toggle">
+                <input type="checkbox" @bind="editIsPublic" class="toggle-checkbox" />
+                <span class="toggle-label">Сделать плейлист публичным</span>
+            </label>
+        </div>
+
+        <div class="form-group">
+            <label>Текущая обложка</label>
+            @if (!string.IsNullOrEmpty(playlist.CoverPath))
+            {
+                <div style="display: flex; align-items: center; gap: 12px; margin-top: 8px;">
+                    <img src="@playlist.CoverPath" alt="Cover" style="width: 60px; height: 60px; object-fit: cover; border-radius: 6px;" />
+                    <span style="font-size: 12px; color: var(--text-dim);">@playlist.CoverPath</span>
+                </div>
+            }
+            else
+            {
+                <div style="font-size: 12px; color: var(--text-dim); margin-top: 4px;">Обложка не задана</div>
+            }
+        </div>
+
+        <div class="form-group">
+            <label>Заменить обложку (необязательно)</label>
+            <InputFile OnChange="OnCoverSelected" accept="image/*" class="form-control" />
+            @if (newCoverFile != null)
+            {
+                <div class="file-info">Выбрано: @newCoverFile.Name</div>
+            }
+        </div>
+
+        <!--  СПИСОК ТРЕКОВ В ПЛЕЙЛИСТЕ -->
+        <div class="form-group" style="margin-top: 30px; border-top: 1px solid var(--border); padding-top: 20px;">
+            <label style="margin-bottom: 12px;">Треки в плейлисте (@tracks.Count)</label>
+
+            @if (tracks.Any())
+            {
+                <div class="track-list-modal" style="max-height: 300px;">
+                    @foreach (var track in tracks)
+                    {
+                        <div class="track-item-modal">
+                            <img src="@(track.CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+                            <div class="track-info">
+                                <div class="track-name">@track.Title</div>
+                                <div class="artist-name">@track.Artist</div>
+                            </div>
+                            <button @onclick="() => RemoveTrack(track.Id)" class="btn-remove-track" title="Удалить из плейлиста">
+                                ❌
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                <div style="padding: 16px; text-align: center; color: var(--text-dim); font-size: 13px;">
+                    В плейлисте пока нет треков
+                </div>
+            }
+        </div>
+
+        <!--  КНОПКИ ДЕЙСТВИЙ -->
+        <div class="form-actions" style="margin-top: 24px; display: flex; gap: 12px; flex-wrap: wrap;">
+            <button @onclick="SaveChanges" class="btn btn-primary" disabled="@isSaving">
+                @(isSaving ? "⏳ Сохранение..." : "Сохранить изменения")
+            </button>
+            <button @onclick="ConfirmDeletePlaylist" class="btn btn-danger" disabled="@isSaving">
+                Удалить плейлист
+            </button>
+            <a href="/playlist/@PlaylistId" class="btn btn-secondary">Отмена</a>
+        </div>
+
+        @if (!string.IsNullOrEmpty(message))
+        {
+            <div class="alert @(isError ? "alert-error" : "alert-success")" style="margin-top: 16px;">@message</div>
+        }
+    </div>
+}
+
+<!--  МОДАЛКА ПОДТВЕРЖДЕНИЯ УДАЛЕНИЯ -->
+@if (showDeleteConfirm)
+{
+    <div class="modal-overlay" @onclick="CancelDelete">
+        <div class="modal-content" @onclick:stopPropagation>
+            <h4 style="color: #f44336; margin-bottom: 16px;">Удаление плейлиста</h4>
+            <p style="color: var(--text-dim); margin-bottom: 24px;">
+                Вы действительно хотите удалить плейлист <b>"@playlist?.Name"</b>?<br />
+                <small>Это действие нельзя отменить. Треки не будут удалены из библиотеки.</small>
+            </p>
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button @onclick="CancelDelete" class="btn btn-secondary">Отмена</button>
+                <button @onclick="ExecuteDelete" class="btn btn-danger">Да, удалить</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int PlaylistId { get; set; }
+
+    private Playlist? playlist;
+    private List<Track> tracks = new();
+    private bool isLoading = true;
+    private bool isOwner = false;
+
+    // Данные формы
+    private string editName = "";
+    private bool editIsPublic = false;
+    private IBrowserFile? newCoverFile;
+
+    // Состояние
+    private bool isSaving = false;
+    private string? message;
+    private bool isError = false;
+    private bool showDeleteConfirm = false;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var userIdClaim = auth.User.FindFirst("UserId");
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            {
+                isError = true;
+                message = "Ошибка авторизации";
+                return;
+            }
+
+            playlist = await MusicService.GetPlaylistByIdAsync(PlaylistId);
+            if (playlist == null) return;
+
+            isOwner = playlist.OwnerId == userId;
+            if (!isOwner) return;
+
+            tracks = await MusicService.GetPlaylistTracksAsync(PlaylistId);
+
+            editName = playlist.Name;
+            editIsPublic = playlist.IsPublic;
+        }
+        catch (Exception ex)
+        {
+            isError = true;
+            message = $"Ошибка загрузки: {ex.Message}";
+            Console.WriteLine($"[PlaylistEdit] {ex}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private Task OnCoverSelected(InputFileChangeEventArgs e)
+    {
+        newCoverFile = e.File;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task RemoveTrack(int trackId)
+    {
+        try
+        {
+            var success = await MusicService.RemoveTrackFromPlaylistAsync(PlaylistId, trackId);
+            if (success)
+            {
+                tracks.RemoveAll(t => t.Id == trackId);
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PlaylistEdit] Remove track error: {ex.Message}");
+        }
+    }
+
+    private async Task SaveChanges()
+    {
+        if (string.IsNullOrWhiteSpace(editName))
+        {
+            isError = true;
+            message = "Название плейлиста не может быть пустым";
+            StateHasChanged();
+            return;
+        }
+
+        isSaving = true;
+        message = null;
+        StateHasChanged();
+
+        try
+        {
+            string? coverPathDb = playlist!.CoverPath;
+
+            if (newCoverFile != null)
+            {
+                var coverFolder = Path.Combine(Environment.WebRootPath, "covers");
+                if (!Directory.Exists(coverFolder)) Directory.CreateDirectory(coverFolder);
+
+                var coverFileName = $"{Guid.NewGuid()}{Path.GetExtension(newCoverFile.Name)}";
+                var coverPath = Path.Combine(coverFolder, coverFileName);
+
+                using (var stream = new FileStream(coverPath, FileMode.Create))
+                    await newCoverFile.OpenReadStream().CopyToAsync(stream);
+
+                coverPathDb = $"/covers/{coverFileName}";
+
+                if (!string.IsNullOrEmpty(playlist.CoverPath))
+                {
+                    var oldPath = Path.Combine(Environment.WebRootPath, playlist.CoverPath.TrimStart('/'));
+                    if (File.Exists(oldPath)) File.Delete(oldPath);
+                }
+            }
+
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var userId = int.Parse(auth.User.FindFirst("UserId")!.Value);
+
+            var success = await MusicService.UpdatePlaylistAsync(PlaylistId, userId, editName.Trim(), editIsPublic, coverPathDb);
+
+            if (success)
+            {
+                message = "Изменения сохранены";
+                isError = false;
+                newCoverFile = null;
+
+                playlist.Name = editName;
+                playlist.IsPublic = editIsPublic;
+                playlist.CoverPath = coverPathDb;
+            }
+            else
+            {
+                isError = true;
+                message = "Не удалось сохранить изменения";
+            }
+        }
+        catch (Exception ex)
+        {
+            isError = true;
+            message = $"Ошибка: {ex.Message}";
+        }
+        finally
+        {
+            isSaving = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ConfirmDeletePlaylist()
+    {
+        showDeleteConfirm = true;
+        StateHasChanged();
+    }
+
+    private void CancelDelete()
+    {
+        showDeleteConfirm = false;
+        StateHasChanged();
+    }
+
+    private async Task ExecuteDelete()
+    {
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var userId = int.Parse(auth.User.FindFirst("UserId")!.Value);
+
+            await MusicService.DeletePlaylistAsync(userId, PlaylistId);
+            Navigation.NavigateTo("/playlists");
+        }
+        catch (Exception ex)
+        {
+            isError = true;
+            message = $"Ошибка удаления: {ex.Message}";
+            StateHasChanged();
+        }
+    }
+}
+
+<style>
+    .btn-remove-track {
+        background: transparent;
+        border: none;
+        color: var(--text-dim);
+        font-size: 16px;
+        cursor: pointer;
+        padding: 4px 8px;
+        transition: color 0.2s;
+    }
+
+        .btn-remove-track:hover {
+            color: #f44336;
+        }
+</style>

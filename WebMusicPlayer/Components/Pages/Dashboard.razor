@@ -1,0 +1,195 @@
+﻿@page "/admin"
+@attribute [Authorize(Roles = "Admin")]
+@layout AdminLayout
+@rendermode InteractiveServer
+
+@using Microsoft.EntityFrameworkCore
+@using WebMusicPlayer.Data
+@using WebMusicPlayer.Data.Models
+
+@inject ApplicationDbContext Db
+
+<h3 style="color: white; margin-bottom: 30px;">📊 Панель управления</h3>
+
+@if (isLoading)
+{
+    <div style="color: #888; padding: 40px; text-align: center;">Загрузка статистики...</div>
+}
+else if (!string.IsNullOrEmpty(errorMessage))
+{
+    <div style="color: #f44336; padding: 40px; text-align: center;">
+        ❌ Ошибка загрузки: @errorMessage
+    </div>
+}
+else
+{
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-top: 30px;">
+
+        <!-- Карточка: Всего треков -->
+        <div class="card">
+            <div class="card-value">@trackCount</div>
+            <div class="card-label">Всего треков</div>
+            <div class="card-trend" style="color: #888; font-size: 11px; margin-top: 4px;">
+                @availableTracks доступно
+            </div>
+        </div>
+
+        <!-- Карточка: Пользователей -->
+        <div class="card">
+            <div class="card-value">@userCount</div>
+            <div class="card-label">Пользователей</div>
+            <div class="card-trend" style="color: #2196F3; font-size: 11px; margin-top: 4px;">
+                @newUsersToday новых сегодня
+            </div>
+        </div>
+
+        <!-- Карточка: Плейлистов -->
+        <div class="card">
+            <div class="card-value">@playlistCount</div>
+            <div class="card-label">Плейлистов</div>
+            <div class="card-trend" style="color: #FF9800; font-size: 11px; margin-top: 4px;">
+                @publicPlaylists публичных
+            </div>
+        </div>
+
+        <!-- Карточка: В избранном (суммарно) -->
+        <div class="card">
+            <div class="card-value">@favoritesCount</div>
+            <div class="card-label">В избранном (всего)</div>
+            <div class="card-trend" style="color: #E91E63; font-size: 11px; margin-top: 4px;">
+                ~@avgPerUser на пользователя
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Доп. информация -->
+    <div style="margin-top: 40px; padding: 20px; background: #111; border-radius: 8px; border: 1px solid #333;">
+        <h4 style="color: white; margin: 0 0 16px 0; font-size: 16px;">📈 Детали</h4>
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; font-size: 13px;">
+            <div>
+                <span style="color: #888;">Жанров в системе:</span><br />
+                <strong style="color: white;">@genreCount</strong>
+            </div>
+            <div>
+                <span style="color: #888;">Доступных треков:</span><br />
+                <strong style="color: white;">@availableTracks</strong>
+            </div>
+            <div>
+                <span style="color: #888;">Скрытых треков:</span><br />
+                <strong style="color: #f44336;">@hiddenTracks</strong>
+            </div>
+            <div>
+                <span style="color: #888;">Подтвержденных юзеров:</span><br />
+                <strong style="color: white;">@confirmedUsers</strong>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    // Счётчики
+    private int trackCount = 0;
+    private int userCount = 0;
+    private int playlistCount = 0;
+    private int favoritesCount = 0;
+
+    // Детали
+    private int confirmedUsers = 0;
+    private int publicPlaylists = 0;
+    private int avgPerUser = 0;
+    private int genreCount = 0;
+    private int availableTracks = 0;
+    private int hiddenTracks = 0;
+    private int newUsersToday = 0;
+
+    // Состояние
+    private bool isLoading = true;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadStatisticsAsync();
+    }
+
+    private async Task LoadStatisticsAsync()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = null;
+            StateHasChanged();
+
+
+
+            trackCount = await Db.Tracks.CountAsync();
+            availableTracks = await Db.Tracks.CountAsync(t => t.IsAvailable);
+            hiddenTracks = trackCount - availableTracks;
+            // todayTracks убрал, надо потом будет вернуть
+
+            // 2. Пользователи
+            userCount = await Db.Users.CountAsync();
+            confirmedUsers = await Db.Users.CountAsync(u => u.IsEmailConfirmed);
+            newUsersToday = await Db.Users.CountAsync(u =>
+                u.CreatedAt.Date == DateTime.Today);
+
+            // 3. Плейлисты
+            playlistCount = await Db.Playlists.CountAsync();
+            publicPlaylists = await Db.Playlists.CountAsync(p => p.IsPublic);
+
+            // 4. Избранное
+            favoritesCount = await Db.Favorites.CountAsync();
+
+            // Среднее на пользователя
+            avgPerUser = userCount > 0 ? favoritesCount / userCount : 0;
+
+            // 5. Жанры
+            genreCount = await Db.Genres.CountAsync();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Не удалось загрузить статистику: {ex.Message}";
+            Console.WriteLine($"[Dashboard] Error: {ex}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+}
+
+<style>
+    .card {
+        background: #111;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #333;
+        text-align: center;
+        transition: transform 0.2s, border-color 0.2s;
+    }
+
+        .card:hover {
+            transform: translateY(-2px);
+            border-color: #555;
+        }
+
+    .card-value {
+        font-size: 32px;
+        font-weight: bold;
+        color: white;
+        margin-bottom: 5px;
+    }
+
+    .card-label {
+        color: #666;
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+    }
+
+    .card-trend {
+        font-size: 11px;
+        opacity: 0.9;
+    }
+</style>

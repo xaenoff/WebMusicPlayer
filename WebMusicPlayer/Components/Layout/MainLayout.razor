@@ -1,0 +1,38 @@
+﻿@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+@using WebMusicPlayer.Components.Shared
+
+<CascadingAuthenticationState>
+    <PageTitle>WebMusicPlayer</PageTitle>
+
+    <header class="top-nav">
+        <div class="nav-logo">★</div>
+
+        <div class="nav-center">
+            <nav class="nav-links">
+                <NavLink href="/" Match="NavLinkMatch.All">Main</NavLink>
+                <NavLink href="/favorite">Favorite</NavLink>
+                <NavLink href="/playlists">Playlists</NavLink>
+            </nav>
+        </div>
+
+        <div class="nav-right">
+            <SearchBar />
+
+            <AuthorizeView>
+                <Authorized>
+                    <form method="post" action="/logout" class="logout-form">
+                        <AntiforgeryToken />
+                        <button type="submit" class="btn-logout">LOGOUT</button>
+                    </form>
+                </Authorized>
+            </AuthorizeView>
+        </div>
+    </header>
+
+    <GlobalPlayer />
+
+    <main class="main-content">
+        @Body
+    </main>
+</CascadingAuthenticationState>

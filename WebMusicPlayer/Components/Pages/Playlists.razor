@@ -1,0 +1,121 @@
+﻿@page "/playlists"
+@attribute [Authorize]
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+
+@inject IMusicService MusicService
+@inject PlayerService PlayerService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager NavigationManager
+
+<!-- Обертка "Блок" -->
+<div class="section">
+    <div class="section-header">
+        <div class="filter-row" style="margin-bottom: 20px;">
+            <select @bind="selectedPlaylistGenre" class="form-control genre-select">
+                <option value="">Все жанры</option>
+                @foreach (var genre in playlistGenres)
+                {
+                    <option value="@genre">@genre</option>
+                }
+            </select>
+        </div>
+        <h3 class="section-title">// MY PLAYLISTS</h3>
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">Загрузка плейлистов...</div>
+    }
+    else if (playlists == null || !playlists.Any())
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">
+            У вас пока нет плейлистов.<br />
+            <small>Перейдите в <a href="/favorite" style="color: var(--text-main);">Избранное</a> и создайте свой первый плейлист.</small>
+        </div>
+    }
+    else
+    {
+        <!-- Сетка на 5 карточек -->
+        <div class="playlists-grid">
+            @foreach (var playlist in FilteredPlaylists)
+            {
+                <div class="playlist-card" @onclick="() => OpenPlaylist(playlist.Id)">
+                    <div class="playlist-cover">
+                        @if (!string.IsNullOrEmpty(playlist.CoverPath))
+                        {
+                            <img src="@playlist.CoverPath" alt="Cover" />
+                        }
+                        else if (playlist.Playlist_track?.Any() == true)
+                        {
+                            var firstTrack = playlist.Playlist_track.FirstOrDefault()?.Track;
+                            <img src="@(firstTrack?.CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+                        }
+                        else
+                        {
+                            <img src="/images/default-cover.png" alt="Cover" />
+                        }
+                        <div class="playlist-overlay">▶</div>
+                    </div>
+                    <div class="card-title">@playlist.Name</div>
+                    <div class="playlist-meta">
+                        <span>@(playlist.Playlist_track?.Count ?? 0) треков</span>
+                        <span>@playlist.CreatedAt.ToString("dd.MM.yyyy")</span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private string? selectedPlaylistGenre;
+    private List<string> playlistGenres = new();
+
+    private IEnumerable<Playlist> FilteredPlaylists =>
+        playlists == null ? Enumerable.Empty<Playlist>() :
+        string.IsNullOrEmpty(selectedPlaylistGenre)
+            ? playlists
+            : playlists.Where(p => p.Playlist_track?.Any(pt => pt.Track?.Genre?.Name == selectedPlaylistGenre) == true);
+
+    private void OnPlaylistGenreChanged() => StateHasChanged();
+    private List<Playlist> playlists = new();
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var userIdClaim = auth.User.FindFirst("UserId");
+
+            if (userIdClaim != null && int.TryParse(userIdClaim.Value, out int userId))
+            {
+                playlists = await MusicService.GetUserPlaylistsAsync(userId);
+            }
+
+            playlistGenres = playlists
+            .SelectMany(p => p.Playlist_track?.Select(pt => pt.Track?.Genre?.Name) ?? Enumerable.Empty<string>())
+            .Where(g => !string.IsNullOrEmpty(g))
+            .Distinct()
+            .OrderBy(g => g)
+            .ToList();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"Error loading playlists: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+
+    private void OpenPlaylist(int playlistId)
+    {
+        NavigationManager.NavigateTo($"/playlist/{playlistId}");
+    }
+}

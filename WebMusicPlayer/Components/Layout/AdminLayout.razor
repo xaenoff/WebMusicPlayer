@@ -1,0 +1,138 @@
+﻿@inherits LayoutComponentBase
+@using Microsoft.AspNetCore.Components.Authorization
+
+<div class="admin-wrapper">
+    <!-- Боковое меню -->
+    <aside class="admin-sidebar">
+        <div class="admin-logo">🎵 WEB PLAYER <span style="font-size: 10px; color: var(--text-dim);">ADMIN</span></div>
+        <nav class="admin-nav">
+            <NavLink href="/admin" Match="NavLinkMatch.All" class="nav-link">
+                Обзор
+            </NavLink>
+            <NavLink href="/admin/tracks" class="nav-link">
+                Треки
+            </NavLink>
+            <NavLink href="/admin/playlists" class="nav-link">
+                Плейлисты
+            </NavLink>
+            <NavLink href="/admin/users" class="nav-link">
+                Пользователи
+            </NavLink>
+
+            <div class="admin-divider"></div>
+            <NavLink href="/" class="nav-link text-muted">
+                ← На сайт
+            </NavLink>
+        </nav>
+    </aside>
+
+    <!-- Основной контент -->
+    <main class="admin-main">
+        <header class="admin-header">
+            <h3 class="page-title">Панель управления</h3>
+            <div class="user-badge">Admin Mode</div>
+        </header>
+        <div class="admin-content">
+            @Body
+        </div>
+    </main>
+</div>
+
+<style>
+    /* Стили для админки (локальные, чтобы не ломать основной сайт) */
+    .admin-wrapper {
+        display: flex;
+        height: 100vh;
+        background: #0a0a0a;
+        color: white;
+    }
+
+    .admin-sidebar {
+        width: 250px;
+        background: #111;
+        border-right: 1px solid #333;
+        padding: 20px;
+        display: flex;
+        flex-direction: column;
+    }
+
+    .admin-logo {
+        font-size: 18px;
+        font-weight: bold;
+        margin-bottom: 30px;
+        padding-bottom: 10px;
+        border-bottom: 1px solid #333;
+    }
+
+    .admin-nav {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+    }
+
+    .nav-link {
+        padding: 10px 15px;
+        border-radius: 6px;
+        text-decoration: none;
+        color: #888;
+        transition: 0.2s;
+        font-size: 14px;
+    }
+
+        .nav-link:hover {
+            background: #222;
+            color: white;
+        }
+
+        .nav-link.active {
+            background: #333;
+            color: white;
+            border-left: 3px solid white;
+        }
+
+    .admin-divider {
+        height: 1px;
+        background: #333;
+        margin: 10px 0;
+    }
+
+    .admin-main {
+        flex: 1;
+        overflow-y: auto;
+        background: #050505;
+    }
+
+    .admin-header {
+        padding: 20px 40px;
+        border-bottom: 1px solid #222;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        background: #0a0a0a;
+        position: sticky;
+        top: 0;
+        z-index: 10;
+    }
+
+    .page-title {
+        margin: 0;
+        font-size: 20px;
+    }
+
+    .user-badge {
+        background: #333;
+        padding: 5px 12px;
+        border-radius: 20px;
+        font-size: 12px;
+        font-family: monospace;
+    }
+
+    .admin-content {
+        padding: 40px;
+    }
+
+    .text-muted {
+        color: #666 !important;
+    }
+</style>

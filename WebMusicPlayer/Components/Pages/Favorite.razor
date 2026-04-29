@@ -1,0 +1,192 @@
+﻿@page "/favorite"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Components.Authorization
+@inject IMusicService MusicService
+@inject PlayerService PlayerService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize]
+@using WebMusicPlayer.Components.Shared
+
+
+<!-- Кнопка открытия формы создания плейлиста -->
+<!-- Обертка "Блок" (как на главной) -->
+<div class="section">
+
+    <!-- Заголовок и кнопка -->
+    <div class="section-header">
+        <div class="filter-row" style="margin-bottom: 20px;">
+            <select @bind="selectedFavoriteGenre" class="form-control genre-select">
+                <option value="">Все жанры</option>
+                @foreach (var genre in favoriteGenres)
+                {
+                    <option value="@genre">@genre</option>
+                }
+            </select>
+        </div>
+        <h3 class="section-title"></h3>
+
+
+
+        @if (favorites?.Any() == true)
+        {
+            <button @onclick="OpenPlaylistModal" class="btn-create-playlist">
+                Создать плейлист
+            </button>
+        }
+    </div>
+
+    @if (isLoading)
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">Загрузка...</div>
+    }
+    else if (errorMessage != null)
+    {
+        <div class="alert alert-danger">@errorMessage</div>
+    }
+    else if (favorites == null || !favorites.Any())
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">
+            У вас пока нет любимых треков.<br />
+            <small></small>
+        </div>
+    }
+    else
+    {
+        <!-- Сетка: 4 колонки -->
+        <div class="favorites-grid">
+            @foreach (var track in FilteredFavorites)
+            {
+                <div class="favorite-card-wrapper">
+
+                    <!-- Сам трек  -->
+                    <div class="track-item @(PlayerService.CurrentTrack?.Id == track.Id ? "playing" : "")"
+                         @onclick="() => PlayTrack(track)">
+                        <img src="@(track.CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+                        <div style="flex: 1; min-width: 0;">
+                            <div class="track-name">@track.Title</div>
+                            <div class="artist-name">@track.Artist</div>
+                        </div>
+                        <div style="font-size: 10px; color: var(--text-dim);">
+                            @track.Genre?.Name
+                        </div>
+                    </div>
+
+                    <!-- Кнопка лайка  -->
+                    <div class="fav-button-wrapper">
+                        <FavoriteButton TrackId="track.Id"
+                                        IsFavorite="true"
+                                        OnChanged="@( (bool isFav) => OnFavoriteRemoved(track.Id, isFav) )" />
+                    </div>
+
+                </div>
+            }
+        </div>
+    }
+</div>
+
+
+@* --------------------------------------------------------------------------------------Модалка(форма)ТайлераЗдесьНет------------------------------------------------------------------------------------------------ *@
+
+<PlaylistCreatorModal @key="showPlaylistModal"
+                      Visible="showPlaylistModal"
+                      OnClose="ClosePlaylistModal"
+                      OnPlaylistCreated="OnPlaylistCreatedHandler"
+                      SourceTracks="favorites" />
+
+@code {
+
+    private List<Track> favorites = new();
+    private bool isLoading = true;
+    private string? errorMessage;
+    private bool showPlaylistModal = false;
+    private string? selectedFavoriteGenre;
+    private List<string> favoriteGenres = new();
+
+    private IEnumerable<Track> FilteredFavorites =>
+        favorites == null ? Enumerable.Empty<Track>() :
+        string.IsNullOrEmpty(selectedFavoriteGenre)
+            ? favorites
+            : favorites.Where(t => t.Genre?.Name == selectedFavoriteGenre);
+
+    private void OnFavoriteGenreChanged() => StateHasChanged();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthState.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            if (!user.Identity?.IsAuthenticated ?? true)
+            {
+                errorMessage = "Необходима авторизация";
+                return;
+            }
+
+            var userIdClaim = user.FindFirst("UserId");
+            if (userIdClaim == null || !int.TryParse(userIdClaim.Value, out int userId))
+            {
+                errorMessage = "Не удалось определить пользователя";
+                return;
+            }
+
+            favorites = await MusicService.GetFavoriteTracksAsync(userId);
+
+            favoriteGenres = favorites
+                .Select(t => t.Genre?.Name)
+                .Where(g => !string.IsNullOrEmpty(g))
+                .Distinct()
+                .OrderBy(g => g)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Ошибка загрузки: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task PlayTrack(Track track)
+    {
+        PlayerService.SetQueue(favorites, track);
+        await JS.InvokeVoidAsync("audioManager.loadAndPlay", track.FilePath);
+    }
+
+    private void OnFavoriteRemoved(int trackId, bool isFavorite)
+    {
+        if (!isFavorite)
+        {
+            var track = favorites.FirstOrDefault(t => t.Id == trackId);
+            if (track != null)
+            {
+                favorites.Remove(track);
+                StateHasChanged();
+            }
+        }
+    }
+
+
+    private void OpenPlaylistModal()
+    {
+        showPlaylistModal = true;
+        StateHasChanged();
+    }
+
+    private void ClosePlaylistModal()
+    {
+        showPlaylistModal = false;
+        StateHasChanged();
+    }
+
+    private async Task OnPlaylistCreatedHandler()
+    {
+        Console.WriteLine("[Favorite] Плейлист создан, можно обновить список");
+        await Task.CompletedTask;
+    }
+}
+    

@@ -1,0 +1,300 @@
+﻿@page "/admin/tracks/upload"
+@attribute [Authorize(Roles = "Admin")]
+@layout AdminLayout
+@rendermode InteractiveServer
+
+@using TagLib
+@using Microsoft.AspNetCore.Components.Forms
+@using WebMusicPlayer.Data.Models
+
+@inject IMusicService MusicService
+@inject IWebHostEnvironment Environment
+
+<h3 style="color: white; margin-bottom: 30px;"> Загрузка нового трека</h3>
+
+<div class="upload-form">
+    <!-- Название трека -->
+    <div class="form-group">
+        <label>Название трека *</label>
+        <input @bind="trackModel.Title" class="form-control" placeholder="Введите название" />
+    </div>
+
+    <!-- Исполнитель -->
+    <div class="form-group">
+        <label>Исполнитель *</label>
+        <input @bind="trackModel.Artist" class="form-control" placeholder="Введите исполнителя" />
+    </div>
+
+    <!-- Жанр -->
+    <div class="form-group">
+        <label>Жанр</label>
+        <select @bind="trackModel.GenreId" class="form-control">
+            <option value="0">Выберите жанр (необязательно)</option>
+            @foreach (var genre in genres)
+            {
+                <option value="@genre.Id">@genre.Name</option>
+            }
+        </select>
+    </div>
+
+    <!-- MP3 Файл -->
+    <div class="form-group">
+        <label>Аудиофайл (MP3) *</label>
+        <InputFile OnChange="OnAudioFileSelected" accept=".mp3,audio/mpeg" class="form-control" />
+        @if (audioFile != null)
+        {
+            <div class="file-info"> Выбрано: @audioFile.Name (@((audioFile.Size / 1024.0 / 1024.0).ToString("F2")) MB)</div>
+        }
+    </div>
+
+    <!-- Обложка -->
+    <div class="form-group">
+        <label>Обложка (опционально)</label>
+        <InputFile OnChange="OnCoverFileSelected" accept="image/*" class="form-control" />
+        @if (coverFile != null)
+        {
+            <div class="file-info">Выбрано: @coverFile.Name</div>
+        }
+    </div>
+
+    <!-- Кнопки -->
+    <div class="form-actions">
+        <button type="button" @onclick="HandleUpload" class="btn btn-primary" disabled="@isUploading">
+            @(isUploading ? "⏳ Загрузка..." : "Сохранить трек")
+        </button>
+        <a href="/admin/tracks" class="btn btn-secondary">Отмена</a>
+    </div>
+
+    @if (!string.IsNullOrEmpty(errorMessage))
+    {
+        <div class="error-message"> @errorMessage</div>
+    }
+    @if (successMessage != null)
+    {
+        <div class="success-message"> @successMessage</div>
+    }
+</div>
+
+@code {
+    private TrackInputModel trackModel = new();
+    private IBrowserFile? audioFile;
+    private IBrowserFile? coverFile;
+    private List<Genre> genres = new();
+    private bool isUploading = false;
+    private string? errorMessage;
+    private string? successMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        genres = await MusicService.GetAllGenresAsync();
+    }
+
+    private Task OnAudioFileSelected(InputFileChangeEventArgs e)
+    {
+        audioFile = e.File;
+        errorMessage = null;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private Task OnCoverFileSelected(InputFileChangeEventArgs e)
+    {
+        coverFile = e.File;
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private async Task HandleUpload()
+    {
+        // Валидация входных данных
+        if (string.IsNullOrWhiteSpace(trackModel.Title) ||
+            string.IsNullOrWhiteSpace(trackModel.Artist) ||
+            audioFile == null)
+        {
+            errorMessage = "Заполните название, исполнителя и выберите MP3 файл.";
+            StateHasChanged();
+            return;
+        }
+
+        isUploading = true;
+        errorMessage = null;
+        successMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            // Подготовка путей
+            var musicFolder = Path.Combine(Environment.WebRootPath, "music");
+            var coverFolder = Path.Combine(Environment.WebRootPath, "covers");
+
+            if (!Directory.Exists(musicFolder)) Directory.CreateDirectory(musicFolder);
+            if (!Directory.Exists(coverFolder)) Directory.CreateDirectory(coverFolder);
+
+
+            var audioFileName = $"{Guid.NewGuid()}.mp3";
+            var audioPath = Path.Combine(musicFolder, audioFileName);
+
+            using (var stream = new FileStream(audioPath, FileMode.Create))
+            {
+                await audioFile.OpenReadStream(50L * 1024 * 1024).CopyToAsync(stream);
+            }
+
+            // Чтение длительности через TagLib 
+            int duration = 0;
+            try
+            {
+                using var tagFile = TagLib.File.Create(audioPath);
+                duration = (int)tagFile.Properties.Duration.TotalSeconds;
+            }
+            catch
+            {
+                
+            }
+
+            string? coverPathDb = null;
+            if (coverFile != null)
+            {
+                var coverFileName = $"{Guid.NewGuid()}{Path.GetExtension(coverFile.Name)}";
+                var coverPath = Path.Combine(coverFolder, coverFileName);
+                coverPathDb = $"/covers/{coverFileName}";
+
+                using (var stream = new FileStream(coverPath, FileMode.Create))
+                {
+                    await coverFile.OpenReadStream().CopyToAsync(stream);
+                }
+            }
+
+            var newTrack = new Track
+                {
+                    Title = trackModel.Title.Trim(),
+                    Artist = trackModel.Artist.Trim(),
+                    GenreId = trackModel.GenreId > 0 ? trackModel.GenreId : null,
+                    FilePath = $"/music/{audioFileName}",
+                    CoverPath = coverPathDb,
+                    DurationSeconds = duration,
+                    IsAvailable = true
+                };
+
+            await MusicService.CreateTrackAsync(newTrack);
+
+            successMessage = $"Трек \"{newTrack.Title}\" загружен!";
+            trackModel = new TrackInputModel();
+            audioFile = null;
+            coverFile = null;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[TracksUpload] Ошибка загрузки: {ex.Message}");
+            errorMessage = $"Ошибка: {ex.Message}";
+        }
+        finally
+        {
+            isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    public class TrackInputModel
+    {
+        public string Title { get; set; } = "";
+        public string Artist { get; set; } = "";
+        public int GenreId { get; set; } = 0;
+    }
+}
+
+<style>
+    .upload-form {
+        max-width: 600px;
+    }
+
+    .form-group {
+        margin-bottom: 20px;
+    }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            color: #888;
+            font-size: 14px;
+        }
+
+    .form-control {
+        width: 100%;
+        padding: 10px;
+        background: #111;
+        border: 1px solid #333;
+        color: white;
+        border-radius: 6px;
+        font-size: 14px;
+        box-sizing: border-box;
+    }
+
+        .form-control:focus {
+            border-color: #555;
+            outline: none;
+        }
+
+    .file-info {
+        margin-top: 5px;
+        font-size: 12px;
+        color: #4CAF50;
+    }
+
+    .form-actions {
+        display: flex;
+        gap: 12px;
+        margin-top: 30px;
+    }
+
+    .btn {
+        padding: 10px 20px;
+        border: none;
+        border-radius: 6px;
+        font-size: 14px;
+        cursor: pointer;
+        text-decoration: none;
+        display: inline-block;
+    }
+
+    .btn-primary {
+        background: white;
+        color: black;
+        font-weight: bold;
+    }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #ddd;
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+    .btn-secondary {
+        background: #333;
+        color: white;
+    }
+
+        .btn-secondary:hover {
+            background: #444;
+        }
+
+    .error-message {
+        margin-top: 20px;
+        padding: 10px;
+        background: rgba(255, 0, 0, 0.1);
+        border: 1px solid #f44336;
+        color: #f44336;
+        border-radius: 6px;
+    }
+
+    .success-message {
+        margin-top: 20px;
+        padding: 10px;
+        background: rgba(76, 175, 80, 0.1);
+        border: 1px solid #4CAF50;
+        color: #4CAF50;
+        border-radius: 6px;
+    }
+</style>
