@@ -1,0 +1,71 @@
+﻿@page "/Register"
+@model WebMusicPlayer.Pages.RegisterModel
+@{
+    Layout = null;
+}
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Регистрация - WebMusicPlayer</title>
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+
+    <div class="auth-container">
+        <div class="auth-box">
+            <h3>Регистрация</h3>
+
+            @if (!string.IsNullOrEmpty(Model.Message))
+            {
+                <!-- Если сообщение содержит слово "отправлен" или "успешно", считаем его success, иначе error -->
+                var isInfo = Model.Message.Contains("отправлен") || Model.Message.Contains("подтверждён");
+                <div class="auth-message @(isInfo ? "success" : "error")">@Model.Message</div>
+            }
+
+            <form method="post">
+
+                @if (Model.Step == 1)
+                {
+                    <!-- ШАГ 1: Данные -->
+                    <label>Email</label>
+                    <input asp-for="Email" class="form-control" type="email" required />
+
+                    <label>Пароль</label>
+                    <input asp-for="Password" class="form-control" type="password" required />
+
+                    <label>Подтвердите пароль</label>
+                    <input asp-for="ConfirmPassword" class="form-control" type="password" required />
+
+                    <button type="submit" class="btn-auth">Зарегистрироваться</button>
+                }
+                else
+                {
+                    <!-- ШАГ 2: Код -->
+                    <input type="hidden" asp-for="Step" value="2" />
+                    <input type="hidden" asp-for="Email" value="@Model.Email" />
+
+                    <div style="text-align: center; margin-bottom: 20px; color: var(--text-dim); font-size: 13px;">
+                        <p>Код отправлен на <span style="color: var(--text-main); font-weight: bold;">@Model.Email</span></p>
+                        <p>Проверьте почту</p>
+                    </div>
+
+                    <label>Введите код</label>
+                    <input asp-for="Code" class="form-control" placeholder="123456" maxlength="6" required style="text-align: center; letter-spacing: 5px; font-size: 20px;" />
+
+                    <button type="submit" class="btn-auth">Подтвердить</button>
+                }
+
+            </form>
+
+            <p class="auth-footer">
+                Уже есть аккаунт? <a href="/Login">Войти</a>
+            </p>
+        </div>
+    </div>
+
+</body>
+</html>

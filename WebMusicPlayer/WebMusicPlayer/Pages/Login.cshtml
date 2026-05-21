@@ -1,0 +1,49 @@
+﻿@page "/Login"
+@model WebMusicPlayer.Pages.LoginModel
+@{
+    Layout = null;
+}
+
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Вход - WebMusicPlayer</title>
+    <link rel="stylesheet" href="lib/bootstrap/dist/css/bootstrap.min.css" />
+    <link rel="stylesheet" href="app.css" />
+</head>
+<body>
+
+    <div class="auth-container">
+        <div class="auth-box">
+            <h3>Вход</h3>
+
+            @if (!string.IsNullOrEmpty(Model.Message))
+            {
+                <div class="auth-message error">@Model.Message</div>
+            }
+
+            <form method="post" asp-antiforgery="true">
+                <label>Email</label>
+                <input asp-for="Email" class="form-control" autocomplete="email" />
+
+                <label>Пароль</label>
+                <input asp-for="Password" type="password" class="form-control" autocomplete="current-password" />
+
+                <label class="auth-check">
+                    <input asp-for="RememberMe" />
+                    <span>Запомнить меня</span>
+                </label>
+
+                <button type="submit" class="btn-auth">Войти</button>
+            </form>
+
+            <p class="auth-footer">
+                Нет аккаунта? <a href="/Register">Зарегистрироваться</a>
+            </p>
+        </div>
+    </div>
+
+</body>
+</html>

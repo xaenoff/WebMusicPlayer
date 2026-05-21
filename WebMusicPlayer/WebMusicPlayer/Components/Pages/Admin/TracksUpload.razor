@@ -1,0 +1,228 @@
+﻿@page "/admin/tracks/upload"
+@attribute [Authorize(Roles = "Admin")]
+@layout AdminLayout
+@rendermode InteractiveServer
+
+@using TagLib
+@using Microsoft.AspNetCore.Components.Forms
+@using WebMusicPlayer.Data.Models
+
+@inject IMusicService MusicService
+@inject IWebHostEnvironment Environment
+@inject IJSRuntime JS
+
+<h3 style="color: white; margin-bottom: 30px;">Массовая загрузка треков</h3>
+
+<div class="upload-form" style="max-width: 700px;">
+
+    <div class="form-group">
+        <label>Жанр для всех треков</label>
+        <select @bind="selectedGenreId" class="form-control">
+            <option value="0">Без жанра</option>
+            @foreach (var genre in genres)
+            {
+                <option value="@genre.Id">@genre.Name</option>
+            }
+        </select>
+    </div>
+
+    <div class="form-group">
+        <label>Аудиофайлы (MP3) *</label>
+        <InputFile OnChange="OnFilesSelected" accept=".mp3,audio/mpeg" class="form-control" multiple />
+
+        @if (selectedFiles.Count > 0)
+        {
+            <div class="file-info" style="margin-top: 8px; color: #4CAF50;">
+                ✅ Выбрано файлов: <strong>@selectedFiles.Count</strong>
+            </div>
+        }
+    </div>
+
+    <!-- Кнопка: активна только если есть файлы и не идёт загрузка -->
+    <div class="form-actions">
+        <button type="button"
+                @onclick="StartUpload"
+                class="btn btn-primary"
+                disabled="@(isUploading || selectedFiles.Count == 0)">
+            @(isUploading ? $"Загрузка... {processedCount}/{selectedFiles.Count}" : "Загрузить все")
+        </button>
+        <a href="/admin/tracks" class="btn btn-secondary">Отмена</a>
+    </div>
+
+    <!-- Прогресс и результаты -->
+    @if (isUploading || successMessage != null || errorMessage != null)
+    {
+        <div style="margin-top: 20px; padding: 16px; background: #111; border: 1px solid #333; border-radius: 6px;">
+            @if (isUploading)
+            {
+                <div style="color: #888; margin-bottom: 8px;">Обработка: @processedCount из @selectedFiles.Count</div>
+                <div style="height: 4px; background: #333; border-radius: 2px; overflow: hidden;">
+                    <div style="height: 100%; width: @(selectedFiles.Count > 0 ? (processedCount * 100 / selectedFiles.Count) : 0)%; background: #4CAF50; transition: width 0.3s;"></div>
+                </div>
+            }
+            @if (!string.IsNullOrEmpty(successMessage))
+            {
+                <div class="success-message" style="margin-top: 12px; color: #4CAF50;">✅ @successMessage</div>
+            }
+            @if (!string.IsNullOrEmpty(errorMessage))
+            {
+                <div class="error-message" style="margin-top: 8px; color: #f44336; white-space: pre-line;">⚠️ @errorMessage</div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<Genre> genres = new();
+    private List<IBrowserFile> selectedFiles = new();
+    private int selectedGenreId = 0;
+
+    private bool isUploading = false;
+    private int processedCount = 0;
+    private string? successMessage;
+    private string? errorMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        genres = await MusicService.GetAllGenresAsync();
+    }
+
+    private async Task OnFilesSelected(InputFileChangeEventArgs e)
+    {
+        Console.WriteLine($"[Upload] OnFilesSelected вызван. Файлов в аргументах: {e.GetMultipleFiles().Count()}");
+        try
+        {
+            // Получаем файлы (макс. 50 за раз)
+            selectedFiles = e.GetMultipleFiles(maximumFileCount: 50).ToList();
+            Console.WriteLine($"[Upload] selectedFiles.Count = {selectedFiles.Count}");
+
+            successMessage = null;
+            errorMessage = null;
+            processedCount = 0;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Upload] Ошибка в OnFilesSelected: {ex.Message}");
+            errorMessage = $"Ошибка выбора файлов: {ex.Message}";
+            StateHasChanged();
+        }
+    }
+
+    private async Task StartUpload()
+    {
+        Console.WriteLine($"[Upload] StartUpload вызван. Файлов: {selectedFiles.Count}");
+
+        if (selectedFiles.Count == 0)
+        {
+            Console.WriteLine("[Upload] Нет файлов для загрузки.");
+            return;
+        }
+
+        isUploading = true;
+        processedCount = 0;
+        successMessage = null;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var musicFolder = Path.Combine(Environment.WebRootPath, "music");
+            if (!Directory.Exists(musicFolder)) Directory.CreateDirectory(musicFolder);
+
+            var tracksToSave = new List<Track>();
+            var errors = new List<string>();
+
+            foreach (var file in selectedFiles)
+            {
+                try
+                {
+                    Console.WriteLine($"[Upload] Обработка файла: {file.Name}");
+
+                    var fileName = $"{Guid.NewGuid()}.mp3";
+                    var filePath = Path.Combine(musicFolder, fileName);
+
+                    // Сохраняем файл на диск
+                    using var stream = new FileStream(filePath, FileMode.Create);
+                    await file.OpenReadStream(50L * 1024 * 1024).CopyToAsync(stream);
+
+                    // Читаем длительность
+                    int duration = 0;
+                    string? lyrics = null;
+                    try
+                    {
+                        using var tagFile = TagLib.File.Create(filePath);
+                        duration = (int)tagFile.Properties.Duration.TotalSeconds;
+
+
+
+
+                        Console.WriteLine($"[Upload] Длительность: {duration} сек");
+                        lyrics = tagFile.Tag.Lyrics;
+
+                        // string? lyrics = null;
+                        // if (tagFile.Tag.Lyrics != null && tagFile.Tag.Lyrics.Length > 0)
+                        // {
+                        //     В MP3 лирика часто хранится массивом, объединяем в один текст
+                        //     lyrics = string.Join("\n", tagFile.Tag.Lyrics);
+                        // }
+
+                        // Console.WriteLine($"[Upload] Длительность: {duration} сек");
+
+                        // string? lyrics = tagFile.Tag.Lyrics;
+                    }
+                    catch { Console.WriteLine($"[Upload] Не удалось прочитать метаданные {file.Name}"); }
+
+
+
+                    tracksToSave.Add(new Track
+                        {
+                            Title = Path.GetFileNameWithoutExtension(file.Name),
+                            Artist = "Unknown Artist", // Или tagFile.Tag.FirstPerformer, если есть
+                            GenreId = selectedGenreId > 0 ? selectedGenreId : null,
+                            FilePath = $"/music/{fileName}",
+                            DurationSeconds = duration,
+                            Lyrics = lyrics,  // 🔹 Сохраняем в БД
+                            IsAvailable = true
+                        });
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"[Upload] Ошибка обработки файла {file.Name}: {ex.Message}");
+                    errors.Add($"Файл '{file.Name}': {ex.Message}");
+                }
+                finally
+                {
+                    processedCount++;
+                    StateHasChanged();
+                }
+            }
+
+            // Сохраняем в БД
+            if (tracksToSave.Any())
+            {
+                Console.WriteLine($"[Upload] Сохранение {tracksToSave.Count} треков в БД...");
+                var (created, dbErrors) = await MusicService.CreateTracksBulkAsync(tracksToSave);
+                if (created.Any())
+                    successMessage = $"Успешно загружено треков: {created.Count}";
+
+                errors.AddRange(dbErrors);
+            }
+
+            if (errors.Any())
+                errorMessage = string.Join("\n", errors);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Upload] ГЛОБАЛЬНАЯ ОШИБКА: {ex.Message}");
+            errorMessage = $"Глобальная ошибка: {ex.Message}";
+        }
+        finally
+        {
+            selectedFiles.Clear();
+            isUploading = false;
+            StateHasChanged();
+            Console.WriteLine("[Upload] Загрузка завершена.");
+        }
+    }
+}

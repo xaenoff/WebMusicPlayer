@@ -1,0 +1,81 @@
+﻿@page "/lyrics/{TrackId:int}"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject IMusicService MusicService
+@inject NavigationManager Nav
+@inject WebMusicPlayer.Services.PlayerService PlayerService
+@implements IDisposable 
+
+<div class="lyrics-page">
+    <button @onclick="GoBack" class="btn-back" style="margin-bottom: 20px;">
+        ← Назад
+    </button>
+
+    @if (isLoading)
+    {
+        <div style="padding: 40px; text-align: center; color: var(--text-dim);">Загрузка...</div>
+    }
+    else if (track == null)
+    {
+        <div style="padding: 40px; text-align: center; color: var(--text-dim);">Трек не найден</div>
+    }
+    else if (string.IsNullOrWhiteSpace(track.Lyrics))
+    {
+        <div style="padding: 60px 20px; text-align: center;">
+            <h3 style="color: var(--text-main); margin-bottom: 10px;">@track.Title</h3>
+            <p style="color: var(--text-dim); font-size: 14px;">Текст не добавлен</p>
+        </div>
+    }
+    else
+    {
+        <LyricsWave CurrentTime="@PlayerService.CurrentTime" IsPlaying="@PlayerService.IsPlaying" />
+
+        <div class="lyrics-content">
+            <div class="lyrics-header">
+                <h2 style="color: var(--text-main); margin: 0;">@track.Title</h2>
+                <span style="color: var(--text-dim); font-size: 14px;">@track.Artist</span>
+            </div>
+            <pre class="lyrics-text-layer">@track.Lyrics</pre>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int TrackId { get; set; }
+    private WebMusicPlayer.Data.Models.Track? track;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        track = await MusicService.GetTrackByIdAsync(TrackId);
+        isLoading = false;
+    }
+
+    private void GoBack()
+    {
+        Nav.NavigateTo("/");
+    }
+
+    protected override void OnInitialized()
+    {
+        PlayerService.TimeUpdated += OnTimeUpdated;
+        PlayerService.StateChanged += OnStateChanged;
+    }
+
+    public void Dispose()
+    {
+        PlayerService.TimeUpdated -= OnTimeUpdated;
+        PlayerService.StateChanged -= OnStateChanged;
+    }
+
+    private void OnTimeUpdated()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+
+    private void OnStateChanged()
+    {
+        InvokeAsync(StateHasChanged);
+    }
+}

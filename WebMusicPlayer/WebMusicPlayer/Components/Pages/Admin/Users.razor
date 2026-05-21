@@ -1,0 +1,150 @@
+﻿@page "/admin/users"
+@attribute [Authorize(Roles = "Admin")]
+@layout AdminLayout
+@rendermode InteractiveServer
+
+@using WebMusicPlayer.Data.Models
+@inject IMusicService MusicService
+
+<h3 style="color: white; margin-bottom: 30px;">Управление пользователями</h3>
+
+@if (isLoading)
+{
+    <div style="color: #888; padding: 40px; text-align: center;">Загрузка...</div>
+}
+else if (users != null && users.Any())
+{
+    <table style="width: 100%; border-collapse: collapse; color: white;">
+        <thead>
+            <tr style="border-bottom: 2px solid #333; text-align: left;">
+                <th style="padding: 12px;">ID</th>
+                <th style="padding: 12px;">Email</th>
+                <th style="padding: 12px;">Роль</th>
+                <th style="padding: 12px;">Статус</th>
+                <th style="padding: 12px;">Дата</th>
+                <th style="padding: 12px; text-align: right;">Действия</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var user in users)
+            {
+                <tr style="border-bottom: 1px solid #222;">
+                    <td style="padding: 12px; color: #666;">@user.Id</td>
+                    <td style="padding: 12px;">@user.Email</td>
+
+                    <td style="padding: 12px;">
+                        <span class="role-badge @(user.Role == "Admin" ? "role-admin" : "role-user")">
+                            @user.Role
+                        </span>
+                    </td>
+
+                    <td style="padding: 12px;">
+                        @if (user.IsBlocked)
+                        {
+                            <span style="color: #f44336;">Забанен</span>
+                        }
+                        else
+                        {
+                            <span style="color: #4CAF50;">Активен</span>
+                        }
+                    </td>
+
+                    <td style="padding: 12px; color: #888; font-size: 12px;">
+                        @user.CreatedAt.ToString("dd.MM.yyyy")
+                    </td>
+
+                    <td style="padding: 12px; text-align: right;">
+                        <button @onclick="() => ChangeRole(user)" class="btn-action btn-edit" style="margin-right: 5px;">
+                            @(user.Role == "Admin" ? "Снять права" : "Дать права")
+                        </button>
+                        <button @onclick="() => ToggleBlock(user)" class="btn-action @(user.IsBlocked ? "btn-success" : "btn-delete")">
+                            @(user.IsBlocked ? "Разбанить" : "Забанить")
+                        </button>
+                    </td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+else
+{
+    <div style="color: #888; padding: 40px; text-align: center;">Пользователей пока нет.</div>
+}
+
+@code {
+    private List<User>? users;
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadUsersAsync();
+    }
+
+    private async Task LoadUsersAsync()
+    {
+        users = await MusicService.GetAllUsersAsync();
+        isLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task ChangeRole(User user)
+    {
+        var newRole = user.Role == "Admin" ? "User" : "Admin";
+        await MusicService.UpdateUserRoleAsync(user.Id, newRole);
+        await LoadUsersAsync();
+    }
+
+    private async Task ToggleBlock(User user)
+    {
+        await MusicService.ToggleUserBlockAsync(user.Id);
+        await LoadUsersAsync();
+    }
+}
+
+<style>
+    .role-badge {
+        padding: 4px 8px;
+        border-radius: 4px;
+        font-size: 11px;
+        font-weight: bold;
+        text-transform: uppercase;
+    }
+
+    .role-admin {
+        background: rgba(255, 193, 7, 0.2);
+        color: #ffc107;
+        border: 1px solid #ffc107;
+    }
+
+    .role-user {
+        background: grey;
+        color: lightgrey;
+        border: 1px solid lightgrey;
+    }
+
+    .btn-action {
+        padding: 6px 10px;
+        background: transparent;
+        border: 1px solid #333;
+        color: #888;
+        font-size: 12px;
+        cursor: pointer;
+        border-radius: 4px;
+        transition: all 0.2s;
+    }
+
+    .btn-edit:hover {
+        border-color: #4CAF50;
+        color: #4CAF50;
+    }
+
+    .btn-delete:hover {
+        border-color: #f44336;
+        color: #f44336;
+    }
+
+    .btn-success:hover {
+        border-color: #2196F3;
+        color: #2196F3;
+    }
+</style>

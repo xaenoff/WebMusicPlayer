@@ -1,0 +1,257 @@
+﻿@page "/tracks"
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@using Microsoft.AspNetCore.Authorization
+@using WebMusicPlayer.Models
+@using WebMusicPlayer.Models.DTO
+
+@inject IMusicService MusicService
+@inject PlayerService PlayerService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+
+<div class="section">
+    <div class="section-header">
+        <h3 class="section-title">// ALL TRACKS</h3>
+    </div>
+
+    <!-- ФИЛЬТРЫ И ПОИСК -->
+    <div class="filters-row" style="display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+            <input type="text"
+                   value="@searchQuery"
+                   @oninput="OnSearchChangedAsync"
+                   placeholder="Поиск по названию или исполнителю..."
+                   class="form-control" />
+        </div>
+
+        <div style="min-width: 150px;">
+            <select @onchange="OnGenreChangedAsync" class="form-control">
+                <option value="">Все жанры</option>
+                @if (availableGenres != null)
+                {
+                    @foreach (var genre in availableGenres)
+                    {
+                        <option value="@genre.Id" selected="@(selectedGenreId == genre.Id)">@genre.Name</option>
+                    }
+                }
+            </select>
+        </div>
+
+        <div style="min-width: 150px;">
+            <select @onchange="OnSortChangedAsync" class="form-control">
+                <option value="name" selected="@(sortBy == "name")">По названию</option>
+                <option value="artist" selected="@(sortBy == "artist")">По исполнителю</option>
+                <option value="date" selected="@(sortBy == "date")">По дате добавления</option>
+                <option value="duration" selected="@(sortBy == "duration")">По длительности</option>
+            </select>
+        </div>
+
+        <button @onclick="ResetFilters" class="btn btn-outline" style="white-space: nowrap;">
+            Сбросить
+        </button>
+    </div>
+
+    <!-- РЕЗУЛЬТАТЫ -->
+    @if (isLoading)
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">Загрузка...</div>
+    }
+    else if (result?.Items?.Any() != true)
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">
+            Ничего не найдено.<br />
+            <small>Попробуй изменить фильтры</small>
+        </div>
+    }
+    else
+    {
+        <div class="track-list">
+            @foreach (var track in result!.Items)
+            {
+                <div class="track-item @(PlayerService.CurrentTrack?.Id == track.Id ? "playing" : "")"
+                     @onclick="() => PlayTrack(track)">
+
+                    <img src="@(track.CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+
+                    <div style="flex: 1; min-width: 0;">
+                        <div class="track-name">@track.Title</div>
+                        <div class="artist-name">@track.Artist</div>
+                    </div>
+
+                    @if (track.Genre != null)
+                    {
+                        <div style="font-size: 10px; color: var(--text-dim);">
+                            @track.Genre.Name
+                        </div>
+                    }
+
+                    <div style="font-size: 10px; color: var(--text-dim);">
+                        @FormatTime(track.DurationSeconds)
+                    </div>
+
+                    <FavoriteButton TrackId="track.Id"
+                                    IsFavorite="@_favoriteIds.Contains(track.Id)"
+                                    OnChanged="@(isFav => OnFavoriteChanged(track.Id, isFav))" />
+                </div>
+            }
+        </div>
+
+        <!-- ПАГИНАЦИЯ -->
+        @if (result?.TotalPages > 1)
+        {
+            <div class="pagination" style="display: flex; gap: 8px; justify-content: center; margin-top: 24px;">
+                @if (result?.Page > 1)
+                {
+                    <button @onclick="() => LoadPage(result!.Page - 1)" class="btn btn-outline">← Назад</button>
+                }
+                <span style="align-self: center; color: var(--text-dim); font-size: 13px;">
+                    Страница @result?.Page из @result?.TotalPages (@result?.TotalCount треков)
+                </span>
+                @if (result?.Page < result?.TotalPages)
+                {
+                    <button @onclick="() => LoadPage(result!.Page + 1)" class="btn btn-outline">Вперёд →</button>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private string? searchQuery;
+    private int? selectedGenreId;
+    private string sortBy = "name";
+
+    private PagedResult<Track>? result;
+    private List<Genre>? availableGenres;
+    private HashSet<int> _favoriteIds = new();
+    private bool isLoading = false;
+    private int currentPage = 1;
+    private const int PageSize = 20;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadGenresAsync();
+        await LoadFavoritesAsync();
+        await LoadPage(currentPage);
+    }
+
+    private async Task LoadGenresAsync()
+    {
+        try
+        {
+            availableGenres = await MusicService.GetAllGenresAsync();
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Tracks] Error loading genres: {ex.Message}");
+        }
+    }
+
+    private async Task LoadFavoritesAsync()
+    {
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            if (auth.User.Identity?.IsAuthenticated == true)
+            {
+                var userIdClaim = auth.User.FindFirst("UserId");
+                if (userIdClaim != null && int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    var favs = await MusicService.GetFavoriteTracksAsync(userId);
+                    _favoriteIds = new HashSet<int>(favs.Select(t => t.Id));
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Tracks] Error loading favorites: {ex.Message}");
+        }
+    }
+
+    private async Task LoadPage(int page)
+    {
+        isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            result = await MusicService.GetAllTracksPagedAsync(
+                page: page,
+                pageSize: PageSize,
+                search: searchQuery,
+                genreId: selectedGenreId,
+                sortBy: sortBy);
+            currentPage = page;
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Tracks] Error loading page: {ex.Message}");
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnSearchChangedAsync(ChangeEventArgs e)
+    {
+        searchQuery = e.Value?.ToString();
+        currentPage = 1;
+        await LoadPage(1);
+    }
+
+    private async Task OnGenreChangedAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var id))
+            selectedGenreId = id;
+        else
+            selectedGenreId = null;
+
+        currentPage = 1;
+        await LoadPage(1);
+    }
+
+    private async Task OnSortChangedAsync(ChangeEventArgs e)
+    {
+        sortBy = e.Value?.ToString() ?? "name";
+        currentPage = 1;
+        await LoadPage(1);
+    }
+
+    private void ResetFilters()
+    {
+        searchQuery = null;
+        selectedGenreId = null;
+        sortBy = "name";
+        currentPage = 1;
+        _ = LoadPage(1);
+    }
+
+    private async Task PlayTrack(Track track)
+    {
+        PlayerService.SetQueue(result?.Items ?? new List<Track>(), track);
+        await JS.InvokeVoidAsync("audioManager.loadAndPlay", track.FilePath);
+    }
+
+    private void OnFavoriteChanged(int trackId, bool isFavorite)
+    {
+        if (isFavorite)
+            _favoriteIds.Add(trackId);
+        else
+            _favoriteIds.Remove(trackId);
+
+        StateHasChanged();
+    }
+
+    private string FormatTime(int seconds)
+    {
+        if (seconds <= 0) return "0:00";
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.Hours > 0
+            ? $"{ts.Hours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
+            : $"{ts.Minutes}:{ts.Seconds:D2}";
+    }
+}

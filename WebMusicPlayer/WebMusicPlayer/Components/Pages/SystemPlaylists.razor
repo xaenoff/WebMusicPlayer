@@ -1,0 +1,174 @@
+﻿@page "/playlists/system"
+@rendermode InteractiveServer
+@inject IMusicService MusicService
+@inject NavigationManager NavigationManager
+@using WebMusicPlayer.Models
+@using WebMusicPlayer.Models.DTO
+@using WebMusicPlayer.Data.Models
+
+<div class="section">
+    <div class="section-header">
+        <h3 class="section-title">// SYSTEM PLAYLISTS</h3>
+    </div>
+
+    <!-- ФИЛЬТРЫ И ПОИСК (идентично пользовательской странице) -->
+    <div class="filters-row" style="display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+            <input type="text" value="@searchQuery" @oninput="OnSearchChangedAsync" placeholder="Поиск по названию..." class="form-control" />
+        </div>
+
+        <div style="min-width: 150px;">
+            <select @onchange="OnGenreChangedAsync" class="form-control">
+                <option value="">Все жанры</option>
+                @if (availableGenres != null)
+                {
+                    @foreach (var genre in availableGenres)
+                    {
+                        <option value="@genre.Id" selected="@(selectedGenreId == genre.Id)">@genre.Name</option>
+                    }
+                }
+            </select>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" @onchange="OnStrictChangedAsync" id="strictGenre" class="form-check-input" checked="@strictGenreMatch" />
+            <label for="strictGenre" style="font-size: 12px; color: var(--text-dim); margin: 0; cursor: pointer;">Только чистые жанры</label>
+        </div>
+
+        <div style="min-width: 150px;">
+            <select @onchange="OnSortChangedAsync" class="form-control">
+                <option value="date" selected="@(sortBy == "date")">По дате создания</option>
+                <option value="name" selected="@(sortBy == "name")">По названию</option>
+                <option value="tracks" selected="@(sortBy == "tracks")">По количеству треков</option>
+            </select>
+        </div>
+
+        <button @onclick="ResetFilters" class="btn btn-outline" style="white-space: nowrap;">Сбросить</button>
+    </div>
+
+    <!-- РЕЗУЛЬТАТЫ -->
+    @if (isLoading)
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">Загрузка...</div>
+    }
+    else if (errorMessage != null)
+    {
+        <div class="alert alert-error">@errorMessage</div>
+    }
+    else if (result?.Items?.Any() != true)
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">
+            Системных плейлистов пока нет.
+        </div>
+    }
+    else
+    {
+        <div class="playlists-grid">
+            @foreach (var playlist in result!.Items)
+            {
+                <div class="playlist-card" @onclick="() => OpenPlaylist(playlist.Id)">
+                    <div class="playlist-cover">
+                        @if (!string.IsNullOrEmpty(playlist.CoverPath))
+                        {
+                            <img src="@playlist.CoverPath" alt="Cover" />
+                        }
+                        else if (!string.IsNullOrEmpty(playlist.FirstTrackCoverPath))
+                        {
+                            <img src="@playlist.FirstTrackCoverPath" alt="Cover" />
+                        }
+                        else
+                        {
+                            <img src="/images/default-cover.png" alt="Cover" />
+                        }
+                        <div class="playlist-overlay">▶</div>
+                    </div>
+                    <div class="card-title">@playlist.Name</div>
+                    <div class="playlist-meta">
+                        <span>@playlist.TrackCount треков</span>
+                        <span>System</span>
+                    </div>
+                </div>
+            }
+        </div>
+
+        @if (result?.TotalPages > 1)
+        {
+            <div class="pagination" style="display: flex; gap: 8px; justify-content: center; margin-top: 24px;">
+                @if (result?.Page > 1)
+                {
+                    <button @onclick="() => LoadPage(result!.Page - 1)" class="btn btn-outline">← Назад</button>
+                }
+                <span style="align-self: center; color: var(--text-dim); font-size: 13px;">
+                    Страница @result?.Page из @result?.TotalPages (@result?.TotalCount плейлистов)
+                </span>
+                @if (result?.Page < result?.TotalPages)
+                {
+                    <button @onclick="() => LoadPage(result!.Page + 1)" class="btn btn-outline">Вперёд →</button>
+                }
+            </div>
+        }
+    }
+</div>
+
+@code {
+    private string? searchQuery;
+    private int? selectedGenreId;
+    private bool strictGenreMatch = false;
+    private string sortBy = "date";
+
+    private PagedResult<PublicPlaylistDto>? result;
+    private List<Genre>? availableGenres;
+    private bool isLoading = false;
+    private string? errorMessage;
+    private int currentPage = 1;
+    private const int PageSize = 20;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadGenresAsync();
+        await LoadPage(currentPage);
+    }
+
+    private async Task LoadGenresAsync()
+    {
+        try { availableGenres = await MusicService.GetPublicPlaylistGenresAsync(); }
+        catch (Exception ex) { Console.WriteLine($"[SystemPlaylists] Error: {ex.Message}"); }
+    }
+
+    private async Task LoadPage(int page)
+    {
+        isLoading = true;
+        errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            // 🔥 Вызываем метод ТОЛЬКО для системных плейлистов
+            result = await MusicService.GetSystemPlaylistsAsync(
+                page: page, pageSize: PageSize, search: searchQuery,
+                genreId: selectedGenreId, sortBy: sortBy, strictGenre: strictGenreMatch);
+            currentPage = page;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = $"Не удалось загрузить: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task OnSearchChangedAsync(ChangeEventArgs e) { searchQuery = e.Value?.ToString(); currentPage = 1; await LoadPage(1); }
+    private async Task OnGenreChangedAsync(ChangeEventArgs e) { if (int.TryParse(e.Value?.ToString(), out var id)) selectedGenreId = id; else selectedGenreId = null; currentPage = 1; await LoadPage(1); }
+    private async Task OnStrictChangedAsync(ChangeEventArgs e) { strictGenreMatch = e.Value is bool val && val; currentPage = 1; await LoadPage(1); }
+    private async Task OnSortChangedAsync(ChangeEventArgs e) { sortBy = e.Value?.ToString() ?? "date"; currentPage = 1; await LoadPage(1); }
+    private void ResetFilters() { searchQuery = null; selectedGenreId = null; strictGenreMatch = false; sortBy = "date"; currentPage = 1; _ = LoadPage(1); }
+
+    private void OpenPlaylist(int playlistId)
+    {
+        // Переход на страницу просмотра плейлиста (не редактирования!)
+        NavigationManager.NavigateTo($"/playlist/{playlistId}");
+    }
+}

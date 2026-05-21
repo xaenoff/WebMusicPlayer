@@ -1,0 +1,28 @@
+﻿<div class="lyrics-visualizer-container @(IsPlaying ? "playing" : "")">
+    <!-- Левая волна -->
+    <div class="wave-edge wave-left">
+        <svg viewBox="0 0 100 1000" preserveAspectRatio="none">
+            <path d="M 50 0 Q 120 125 50 250 T 50 500 T 50 750 T 50 1000"
+                  fill="none"
+                  stroke="rgba(255,255,255,0.7)"
+                  stroke-width="2.5"
+                  stroke-linecap="round" />
+        </svg>
+    </div>
+
+    <!-- Правая волна (зеркальная) -->
+    <div class="wave-edge wave-right">
+        <svg viewBox="0 0 100 1000" preserveAspectRatio="none">
+            <path d="M 50 0 Q 120 125 50 250 T 50 500 T 50 750 T 50 1000"
+                  fill="none"
+                  stroke="rgba(255,255,255,0.7)"
+                  stroke-width="2.5"
+                  stroke-linecap="round" />
+        </svg>
+    </div>
+</div>
+
+@code {
+    [Parameter] public double CurrentTime { get; set; }
+    [Parameter] public bool IsPlaying { get; set; }
+}

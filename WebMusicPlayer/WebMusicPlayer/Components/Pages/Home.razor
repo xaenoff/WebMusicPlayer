@@ -1,0 +1,208 @@
+﻿@using WebMusicPlayer.Components.Shared
+@page "/"
+@using Microsoft.AspNetCore.Authorization
+@using WebMusicPlayer.Data.Models
+@attribute [Authorize]
+@rendermode InteractiveServer
+
+@inject IMusicService MusicService
+@inject PlayerService PlayerService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager NavigationManager
+@using WebMusicPlayer.Models.DTO
+
+<div class="section">
+    <div class="section-header">
+        <h3 class="section-title">// TRACKS</h3>
+        <a href="/tracks" style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;">
+            Показать все →
+        </a>
+    </div>
+
+    @if (randomTracks != null && randomTracks.Any())
+    {
+        <div class="track-list">
+            @foreach (var track in randomTracks)
+            {
+                <div class="track-item @(PlayerService.CurrentTrack?.Id == track.Id ? "playing" : "")"
+                     @onclick="() => PlayTrack(track)">
+
+                    <img src="@(track.CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+
+                    <div style="flex: 1; min-width: 0;">
+                        <div class="track-name">@track.Title</div>
+                        <div class="artist-name">@track.Artist</div>
+                    </div>
+
+                    @if (track.Genre != null)
+                    {
+                        <div style="font-size: 10px; color: var(--text-dim);">
+                            @track.Genre.Name
+                        </div>
+                    }
+
+                    <FavoriteButton TrackId="track.Id"
+                                    IsFavorite="@_favoriteIds.Contains(track.Id)"
+                                    OnChanged="@(isFav => OnFavoriteChanged(track.Id, isFav))" />
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">
+            Треков пока нет.<br />
+            <small>Загрузи первые треки через админ-панель</small>
+        </div>
+    }
+</div>
+
+<div class="section">
+
+
+    <div class="section-header">
+        <h3 class="section-title">// STAFF PICKS</h3>
+        <a href="/playlists/system" style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;">
+            Смотреть все →
+        </a>
+    </div>
+
+    @if (genrePlaylists != null && genrePlaylists.Any())
+    {
+        <div class="playlists-grid">
+            @foreach (var playlist in genrePlaylists)
+            {
+                <div class="playlist-card" @onclick="() => OpenPlaylist(playlist.Id)">
+                    <div class="playlist-cover">
+                        @if (!string.IsNullOrEmpty(playlist.CoverPath))
+                        {
+                            <img src="@playlist.CoverPath" alt="Cover" />
+                        }
+                        else
+                        {
+                            <img src="/images/default-cover.png" alt="Cover" />
+                        }
+                        <div class="playlist-overlay">▶</div>
+                    </div>
+                    <div class="card-title">@playlist.Name</div>
+                    <div class="playlist-meta">
+                        <span>@playlist.TrackCount треков</span>
+                        <span>System</span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="text-muted" style="padding: 20px; text-align: center;">
+            Системных плейлистов пока нет
+        </div>
+    }
+</div>
+
+<div class="section">
+    <div class="section-header">
+        <h3 class="section-title">// USER MIXES</h3>
+        <a href="/playlists/public" style="font-size: 11px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 1px;">
+            Смотреть все →
+        </a>
+    </div>
+    
+    @if (userMixes == null || !userMixes.Any())
+    {
+        <div class="text-muted" style="padding: 40px; text-align: center;">
+            Публичных плейлистов пока нет.<br />
+            <small>Будь первым — создай свой!</small>
+        </div>
+    }
+    else
+    {
+        <div class="playlists-grid">
+            @foreach (var playlist in userMixes)
+            {
+                <div class="playlist-card" @onclick="() => OpenPlaylist(playlist.Id)">
+                    <div class="playlist-cover">
+                        @if (!string.IsNullOrEmpty(playlist.CoverPath))
+                        {
+                            <img src="@playlist.CoverPath" alt="Cover" />
+                        }
+                        else if (!string.IsNullOrEmpty(playlist.FirstTrackCoverPath))
+                        {
+                            <img src="@playlist.FirstTrackCoverPath" alt="Cover" />
+                        }
+                        else
+                        {
+                            <img src="/images/default-cover.png" alt="Cover" />
+                        }
+                        <div class="playlist-overlay">▶</div>
+                    </div>
+                    <div class="card-title">@playlist.Name</div>
+                    <div class="playlist-meta">
+                        <span>@playlist.TrackCount треков</span>
+                        <span>@playlist.OwnerEmail</span>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<Track> randomTracks = new();
+    private HashSet<int> _favoriteIds = new();
+    private List<PublicPlaylistDto>? genrePlaylists;
+    private List<PublicPlaylistDto>? userMixes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            randomTracks = await MusicService.GetRandomTracksAsync(8);
+
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            if (auth.User.Identity?.IsAuthenticated == true)
+            {
+                var userIdClaim = auth.User.FindFirst("UserId");
+                if (userIdClaim != null && int.TryParse(userIdClaim.Value, out int userId))
+                {
+                    var favs = await MusicService.GetFavoriteTracksAsync(userId);
+                    _favoriteIds = new HashSet<int>(favs.Select(t => t.Id));
+                }
+            }
+
+            genrePlaylists = await MusicService.GetRandomPlaylistsAsync(count: 4, systemOnly: true);
+            userMixes = await MusicService.GetRandomPlaylistsAsync(count: 5, systemOnly: false);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[Home] Error: {ex.Message}");
+        }
+    }
+
+    private async Task PlayTrack(Track track)
+    {
+        // 🔹 Используем randomTracks вместо tracks
+        PlayerService.SetQueue(randomTracks, track);
+        await JS.InvokeVoidAsync("audioManager.loadAndPlay", track.FilePath);
+    }
+    private void OnFavoriteChanged(int trackId, bool isFavorite)
+    {
+        if (isFavorite)
+        {
+            _favoriteIds.Add(trackId);
+        }
+        else
+        {
+            _favoriteIds.Remove(trackId);
+        }
+
+        // Мгновенно обновляем разметку страницы
+        StateHasChanged();
+    }
+    private void OpenPlaylist(int playlistId)
+    {
+        NavigationManager.NavigateTo($"/playlist/{playlistId}");
+    }
+}

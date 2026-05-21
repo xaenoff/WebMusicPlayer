@@ -1,0 +1,102 @@
+﻿@page "/admin/playlists/"
+@attribute [Authorize(Roles = "Admin")]
+@layout AdminLayout
+@rendermode InteractiveServer
+
+@using WebMusicPlayer.Data.Models
+@inject IMusicService MusicService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Navigation
+
+<h3 style="color: white; margin-bottom: 30px;">Системные плейлисты</h3>
+
+<!-- Форма создания -->
+<div style="background: #111; padding: 20px; border-radius: 8px; border: 1px solid #333; margin-bottom: 30px; display: flex; gap: 12px; align-items: flex-end;">
+    <div style="flex: 1;">
+        <label style="display: block; margin-bottom: 8px; color: #888; font-size: 12px;">Название нового плейлиста</label>
+        <input @bind="newPlaylistName" class="form-control" placeholder="Например: Русский Рок" />
+    </div>
+    <button @onclick="CreateSystemPlaylist" class="btn btn-primary" disabled="@string.IsNullOrWhiteSpace(newPlaylistName)">
+        Создать
+    </button>
+</div>
+
+@if (isLoading)
+{
+    <div style="color: #888; padding: 40px; text-align: center;">Загрузка...</div>
+}
+else if (playlists != null && playlists.Any())
+{
+    <div class="playlists-grid" style="grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));">
+        @foreach (var playlist in playlists)
+        {
+            <div class="playlist-card" @onclick="() => OpenEditPage(playlist.Id)">
+                <div class="playlist-cover">
+                    @if (!string.IsNullOrEmpty(playlist.CoverPath))
+                    {
+                        <img src="@playlist.CoverPath" alt="Cover" />
+                    }
+                    else
+                    {
+                        <img src="/images/default-cover.png" alt="Cover" />
+                    }
+                    <div class="playlist-overlay">Редактировать</div>
+                </div>
+                <div class="card-title">@playlist.Name</div>
+                <div class="playlist-meta">
+                    <span>@(playlist.Playlist_track?.Count ?? 0) треков</span>
+                </div>
+            </div>
+        }
+    </div>
+}
+else
+{
+    <div style="color: #888; padding: 40px; text-align: center;">
+        Системных плейлистов нет. Создай первый!
+    </div>
+}
+
+@code {
+    private List<Playlist> playlists = new();
+    private string newPlaylistName = "";
+    private bool isLoading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        var all = await MusicService.GetAllPlaylistsAsync();
+        playlists = all.Where(p => p.IsSystem).ToList();
+        isLoading = false;
+        StateHasChanged();
+    }
+
+    private async Task CreateSystemPlaylist()
+    {
+        if (string.IsNullOrWhiteSpace(newPlaylistName)) return;
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userIdClaim = auth.User.FindFirst("UserId");
+        int userId = userIdClaim != null ? int.Parse(userIdClaim.Value) : 0;
+
+        await MusicService.CreatePlaylistAsync(
+            userId,
+            newPlaylistName,
+            new List<int>(),
+            isPublic: true,
+            isSystem: true
+        );
+
+        newPlaylistName = "";
+        await LoadDataAsync();
+    }
+
+    private void OpenEditPage(int playlistId)
+    {
+        Navigation.NavigateTo($"/playlist/{playlistId}/edit");
+    }
+}

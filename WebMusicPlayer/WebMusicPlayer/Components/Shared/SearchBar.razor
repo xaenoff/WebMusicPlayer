@@ -1,0 +1,21 @@
+﻿@rendermode InteractiveServer
+@inject NavigationManager NavManager
+
+<input type="text"
+       class="search-bar"
+       placeholder="SEARCH..."
+       @bind="query"
+       @onkeydown="OnKeyDown" />
+
+@code {
+    private string query = "";
+
+    private void OnKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && !string.IsNullOrWhiteSpace(query))
+        {
+            var safeQuery = Uri.EscapeDataString(query.Trim());
+            NavManager.NavigateTo($"/search?q={safeQuery}");
+        }
+    }
+}

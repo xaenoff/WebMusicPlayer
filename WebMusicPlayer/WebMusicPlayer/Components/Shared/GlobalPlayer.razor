@@ -1,0 +1,202 @@
+﻿@rendermode InteractiveServer
+@inject PlayerService PlayerService
+@inject IJSRuntime JS
+@implements IDisposable
+@inject IMusicService MusicService          
+@inject AuthenticationStateProvider AuthState 
+
+<audio id="global-audio" preload="auto"></audio>
+
+<div class="player-wrapper">
+    <div class="player-bar">
+
+        <!-- 1. ЛЕВАЯ ЧАСТЬ: Кнопки управления (фиксированная ширина) -->
+        <div class="player-controls">
+            <button @onclick="PlayPrevious" class="p-btn" title="Previous">PREV</button>
+            <button @onclick="TogglePlay" class="p-btn play-btn" title="Play/Pause">@PlayIcon</button>
+            <button @onclick="PlayNext" class="p-btn" title="Next">NEXT</button>
+        </div>
+
+        <!-- 2. ЦЕНТРАЛЬНАЯ ЧАСТЬ: Инфо + Прогресс -->
+        <div class="player-center">
+            <!-- Верхняя строка: Обложка, Текст, Лайк, Таймер -->
+            <div class="center-top">
+                <img src="@(PlayerService.CurrentTrack?.CoverPath ?? "/images/default-cover.png")" alt="Cover" class="center-cover" />
+
+                <div class="center-text">
+                    <div class="track-title">@(PlayerService.CurrentTrack?.Title ?? "NO TRACK SELECTED")</div>
+                    <div class="track-artist">@(PlayerService.CurrentTrack?.Artist ?? "")</div>
+                </div>
+
+                <div class="center-meta">
+                    @if (PlayerService.CurrentTrack != null)
+                    {
+                        <FavoriteButton TrackId="PlayerService.CurrentTrack.Id"
+                                        IsFavorite="@PlayerService.IsCurrentTrackFavorite"
+                                        OnChanged="OnFavoriteChanged" />
+
+                        <button class="btn-lyrics" @onclick="OpenLyrics" title="Текст песни">T</button>
+                    }
+                    <span class="timer">@FormatTime(PlayerService.CurrentTime) / @FormatTime(PlayerService.Duration)</span>
+                </div>
+            </div>
+
+            <!-- Нижняя строка: Только прогресс-бар -->
+            <div class="center-bottom">
+                <input type="range" id="progress-slider" class="progress-bar"
+                       min="0" max="100" step="0.1" value="0" />
+            </div>
+        </div>
+
+        <!-- 3. ПРАВАЯ ЧАСТЬ: Громкость -->
+        <div class="player-volume">
+            <span class="vol-label">VOL</span>
+            <input type="range" id="volume-slider" class="volume-slider"
+                   min="0" max="100" value="@PlayerService.Volume"
+                   @oninput="OnVolumeInput" />
+        </div>
+
+    </div>
+</div>
+
+@code {
+    private string PlayIcon => PlayerService.IsPlaying ? "PAUSE" : "PLAY";
+    private bool _isSeeking = false;
+
+    protected override void OnInitialized()
+    {
+        PlayerService.StateChanged += OnStateChanged;
+    }
+
+
+    [JSInvokable]
+    public void OnTimeUpdateFromJs(double? time, double? dur)
+    {
+        PlayerService.UpdateProgress(time ?? 0, dur ?? 0);
+        InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public void OnPlayStateChange(bool playing)
+    {
+        PlayerService.SetPlaying(playing);
+        InvokeAsync(StateHasChanged);
+    }
+
+    [JSInvokable]
+    public async Task OnTrackEnded() => await PlayNext();
+
+
+    private async Task TogglePlay()
+    {
+        if (PlayerService.CurrentTrack == null) return;
+        await JS.InvokeVoidAsync(PlayerService.IsPlaying ? "audioManager.pause" : "audioManager.play");
+    }
+
+    private async Task PlayNext()
+    {
+        var next = PlayerService.GetNextTrack();
+        if (next != null)
+        {
+            PlayerService.LoadTrack(next);
+            await JS.InvokeVoidAsync("audioManager.loadAndPlay", next.FilePath);
+        }
+    }
+
+    private async Task PlayPrevious()
+    {
+        var prev = PlayerService.GetPreviousTrack();
+        if (prev != null)
+        {
+            PlayerService.LoadTrack(prev);
+            await JS.InvokeVoidAsync("audioManager.loadAndPlay", prev.FilePath);
+        }
+    }
+
+    private async Task OnVolumeInput(ChangeEventArgs e)
+    {
+        if (e.Value != null)
+        {
+            PlayerService.Volume = Convert.ToInt32(e.Value);
+            await JS.InvokeVoidAsync("audioManager.setVolume", PlayerService.Volume);
+        }
+    }
+
+
+    private string FormatTime(double seconds)
+    {
+        if (double.IsNaN(seconds)) return "0:00";
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.Hours > 0
+            ? $"{ts.Hours}:{ts.Minutes:D2}:{ts.Seconds:D2}"
+            : $"{ts.Minutes}:{ts.Seconds:D2}";
+    }
+
+    public void Dispose()
+    {
+        PlayerService.StateChanged -= OnStateChanged;
+        PlayerService.TimeUpdated -= OnTimeUpdated;
+    }
+
+    private void OnStateChanged() => InvokeAsync(StateHasChanged);
+    private void OnTimeUpdated() => InvokeAsync(StateHasChanged);
+
+    
+    
+
+    private int _lastSyncedTrackId = 0;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("audioManager.init", DotNetObjectReference.Create(this));
+                await JS.InvokeVoidAsync("audioManager.setVolume", PlayerService.Volume);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[GlobalPlayer] Init error: {ex.Message}");
+            }
+        }
+
+        if (PlayerService.CurrentTrack != null && PlayerService.CurrentTrack.Id != _lastSyncedTrackId)
+        {
+            _lastSyncedTrackId = PlayerService.CurrentTrack.Id;
+            await SyncFavoriteStatusAsync();
+        }
+    }
+
+    private async Task SyncFavoriteStatusAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        if (auth.User.Identity?.IsAuthenticated != true) return;
+
+        var claim = auth.User.FindFirst("UserId");
+        if (claim == null || !int.TryParse(claim.Value, out int userId)) return;
+
+        bool isFav = await MusicService.IsFavoriteAsync(userId, PlayerService.CurrentTrack.Id);
+
+        PlayerService.IsCurrentTrackFavorite = isFav;
+
+        StateHasChanged();
+    }
+
+    private void OnFavoriteChanged(bool isNowFavorite)
+    {
+        PlayerService.IsCurrentTrackFavorite = isNowFavorite;
+        StateHasChanged();
+    }
+
+    @inject NavigationManager Nav
+
+    private void OpenLyrics()
+    {
+        if (PlayerService.CurrentTrack != null)
+        {
+            Nav.NavigateTo($"/lyrics/{PlayerService.CurrentTrack.Id}");
+        }
+    }
+
+}

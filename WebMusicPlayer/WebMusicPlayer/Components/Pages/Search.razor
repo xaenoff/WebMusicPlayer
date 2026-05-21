@@ -1,0 +1,73 @@
+﻿@page "/search"
+@rendermode InteractiveServer
+@inject IMusicService MusicService
+@inject PlayerService PlayerService
+@inject IJSRuntime JS
+
+<div class="section">
+    <div class="section-header">
+        <h3 class="section-title">// РЕЗУЛЬТАТЫ: "@QueryText"</h3>
+    </div>
+
+    @if (isLoading)
+    {
+        <div style="padding: 40px; text-align: center; color: var(--text-dim);">Поиск...</div>
+    }
+    else if (!tracks.Any())
+    {
+        <div style="padding: 40px; text-align: center; color: var(--text-dim);">Ничего не найдено</div>
+    }
+    else
+    {
+        <div class="track-list">
+            @foreach (var track in tracks)
+            {
+                <div class="track-item @(PlayerService.CurrentTrack?.Id == track.Id ? "playing" : "")"
+                     @onclick="() => PlayTrack(track)">
+
+                    <img src="@(track.CoverPath ?? "/images/default-cover.png")" alt="Cover" />
+
+                    <div style="flex: 1; min-width: 0;">
+                        <div class="track-name">@track.Title</div>
+                        <div class="artist-name">@track.Artist</div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter][SupplyParameterFromQuery] public string? q { get; set; }
+    private string QueryText => string.IsNullOrWhiteSpace(q) ? "" : q.Trim();
+
+    private List<Track> tracks = new();
+    private bool isLoading = true;
+    private string? previousQuery;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (QueryText == previousQuery) return;
+
+        previousQuery = QueryText;
+        isLoading = true;
+        StateHasChanged();
+
+        if (!string.IsNullOrWhiteSpace(QueryText))
+        {
+            tracks = await MusicService.SearchTracksAsync(QueryText);
+        }
+        else
+        {
+            tracks = new();
+        }
+
+        isLoading = false;
+    }
+
+    private async Task PlayTrack(Track track)
+    {
+        PlayerService.SetQueue(tracks, track);
+        await JS.InvokeVoidAsync("audioManager.loadAndPlay", track.FilePath);
+    }
+}

@@ -1,0 +1,88 @@
+﻿@inject IAuthService AuthService
+@inject NavigationManager NavigationManager
+@inject AuthenticationStateProvider authStateProvider
+@rendermode InteractiveServer
+
+
+<div class="top-row ps-3 navbar navbar-dark">
+    <div class="container-fluid">
+        <a class="navbar-brand" href="">WebMusicPlayer</a>
+
+        @if (isAuthenticated)
+        {
+            <div class="auth-links ms-auto">
+                <span class="text-light me-3">@currentUserEmail</span>
+
+                <form method="post" action="/logout" class="d-inline">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn btn-outline-light btn-sm">Выйти</button>
+                </form>
+            </div>
+        }
+    </div>
+</div>
+
+<input type="checkbox" title="Navigation menu" class="navbar-toggler" />
+
+<div class="nav-scrollable" onclick="document.querySelector('.navbar-toggler').click()">
+    <nav class="nav flex-column">
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="" Match="NavLinkMatch.All">
+                <span class="bi bi-house-door-fill" aria-hidden="true"></span> Главная
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="music">
+                <span class="bi bi-music-note-beamed" aria-hidden="true"></span> Музыка
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="favorite">
+                <span class="bi bi-heart-fill" aria-hidden="true"></span> Любимое
+            </NavLink>
+        </div>
+
+        <div class="nav-item px-3">
+            <NavLink class="nav-link" href="playlists">
+                <span class="bi bi-collection-fill" aria-hidden="true"></span> Плейлисты
+            </NavLink>
+        </div>
+
+        @if (!isAuthenticated)
+        {
+            <div class="nav-item px-3 mt-3">
+                <hr class="border-secondary" />
+            </div>
+
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="login">
+                    <span class="bi bi-box-arrow-in-right" aria-hidden="true"></span> Войти
+                </NavLink>
+            </div>
+
+            <div class="nav-item px-3">
+                <NavLink class="nav-link" href="register">
+                    <span class="bi bi-person-plus-fill" aria-hidden="true"></span> Регистрация
+                </NavLink>
+            </div>
+        }
+    </nav>
+</div>
+
+@code {
+    private bool isAuthenticated = false;
+    private string currentUserEmail = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await authStateProvider.GetAuthenticationStateAsync();
+        isAuthenticated = authState.User.Identity?.IsAuthenticated ?? false;
+
+        if (isAuthenticated)
+        {
+            currentUserEmail = authState.User.Identity?.Name ?? "";
+        }
+    }
+}
